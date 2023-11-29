@@ -54,6 +54,10 @@ else()
 	message("CUDA not found")
 endif()
 
+if (ENABLE_ASYNC)
+    message("-- Async mode enabled")
+    add_compile_definitions(ASYNC=true)
+endif()
 
 add_subdirectory(usort)
 target_link_libraries(CombBLAS PUBLIC Usortlib)
