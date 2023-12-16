@@ -27,7 +27,8 @@
 
 #include "gSpGEMM.h"
 
-// #define LOG_GNRL_ME_SPGEMM
+#define LOG_GNRL_ME_SPGEMM
+#define TIMING
 
 
 typedef enum {LSPG_CPU, LSPG_NSPARSE, LSPG_HYBRID} lspg_t;
