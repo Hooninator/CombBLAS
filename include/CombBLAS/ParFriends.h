@@ -44,6 +44,9 @@
 #include <unistd.h>
 #include <type_traits>
 
+#define TIMING
+#define MEMORY
+
 namespace combblas {
 
 template <class IT, class NT, class DER>
@@ -498,6 +501,9 @@ SpParMat<IU,NUO,UDERO> MemEfficientSpGEMM (SpParMat<IU,NU1,UDERA> & A, SpParMat<
         int64_t asquareNNZ = EstPerProcessNnzSUMMA(A,B, false);
 		int64_t asquareMem = asquareNNZ * perNNZMem_out * 2; // an extra copy in multiway merge and in selection/recovery step
         
+#ifdef MEMORY
+        if (myrank==0) fprintf(stderr, "[MemEfficientSpGEMM]\t Maximum SUMMA memory: %ld\n", asquareMem);
+#endif
         
         // estimate kselect memory
         int64_t d = ceil( (asquareNNZ * sqrt(p))/ B.getlocalcols() ); // average nnz per column in A^2 (it is an overestimate because asquareNNZ is estimated based on unmerged matrices)
@@ -508,6 +514,11 @@ SpParMat<IU,NUO,UDERO> MemEfficientSpGEMM (SpParMat<IU,NU1,UDERA> & A, SpParMat<
         // estimate output memory
         int64_t outputNNZ = (B.getlocalcols() * k)/sqrt(p);
         int64_t outputMem = outputNNZ * perNNZMem_in * 2;
+
+#ifdef MEMORY
+        if (myrank==0) fprintf(stderr, "[MemEfficientSpGEMM]\t Memory used for kSelect: %ld\n", kselectmem);
+        if (myrank==0) fprintf(stderr, "[MemEfficientSpGEMM]\t Memory used for output: %ld\n", outputMem);
+#endif
         
         //inputMem + outputMem + asquareMem/phases + kselectmem/phases < memory
         int64_t remainingMem = perProcessMemory*1000000000 - inputMem - outputMem;
@@ -516,6 +527,9 @@ SpParMat<IU,NUO,UDERO> MemEfficientSpGEMM (SpParMat<IU,NU1,UDERA> & A, SpParMat<
             phases = 1 + (asquareMem+kselectmem) / remainingMem;
         }
         
+#ifdef MEMORY
+        if (myrank==0) fprintf(stderr, "[MemEfficientSpGEMM]\t Phases: %d\n", phases);
+#endif
         
         if(myrank==0)
         {
@@ -3273,12 +3287,20 @@ SpParMat3D<IU, NUO, UDERO> MemEfficientSpGEMM3D(SpParMat3D<IU, NU1, UDERA> & A, 
         // Calculate per column nnz how left after k-select. Minimum of average degree and k-select parameters.
         int64_t k = std::min(int64_t(std::max(selectNum, recoverNum)), d );
 
+#ifdef MEMORY
+        if (myrank==0) fprintf(stderr, "[MemEfficientSpGEMM3D]\t Memory usage per layer: %ld\n", gasquareMem);
+#endif
+
         //estimate output memory
         int64_t postKselectOutputNNZ = ceil(( (B.GetLayerMat()->getlocalcols() / B.getcommgrid3D()->GetGridLayers() ) * k)/sqrt(p)); // If kselect is run
         int64_t postKselectOutputMem = postKselectOutputNNZ * perNNZMem_out * 2;
         double remainingMem = perProcessMemory*1000000000 - ginputMem - postKselectOutputMem;
         int64_t kselectMem = B.GetLayerMat()->getlocalcols() * k * sizeof(NUO) * 3;
 
+#ifdef MEMORY
+        if (myrank==0) fprintf(stderr, "[MemEfficientSpGEMM3D]\t Memory used for kSelect: %ld\n", kselectMem);
+        if (myrank==0) fprintf(stderr, "[MemEfficientSpGEMM3D]\t Memory used for output: %ld\n", postKselectOutputMem);
+#endif
         //inputMem + outputMem + asquareMem/phases + kselectmem/phases < memory
         if(remainingMem > 0){
             calculatedPhases = ceil( (gasquareMem + kselectMem) / remainingMem ); // If kselect is run
@@ -3288,6 +3310,9 @@ SpParMat3D<IU, NUO, UDERO> MemEfficientSpGEMM3D(SpParMat3D<IU, NU1, UDERA> & A, 
         int gCalculatedPhases;
         MPI_Allreduce(&calculatedPhases, &gCalculatedPhases, 1, MPI_INT, MPI_MAX, A.getcommgrid3D()->GetFiberWorld());
         if(gCalculatedPhases > phases) phases = gCalculatedPhases;
+#ifdef MEMORY
+        if (myrank==0) fprintf(stderr, "[MemEfficientSpGEMM3D]\t Phases: %d\n", phases);
+#endif
     }
     else{
         // Do nothing
