@@ -502,7 +502,7 @@ SpParMat<IU,NUO,UDERO> MemEfficientSpGEMM (SpParMat<IU,NU1,UDERA> & A, SpParMat<
 		int64_t asquareMem = asquareNNZ * perNNZMem_out * 2; // an extra copy in multiway merge and in selection/recovery step
         
 #ifdef MEMORY
-        if (myrank==0) fprintf(stderr, "[MemEfficientSpGEMM]\t Maximum SUMMA memory: %ld\n", asquareMem);
+        if (myrank==0) fprintf(stdout, "[MemEfficientSpGEMM]\t Maximum SUMMA memory: %ld\n", asquareMem);
 #endif
         
         // estimate kselect memory
@@ -516,8 +516,8 @@ SpParMat<IU,NUO,UDERO> MemEfficientSpGEMM (SpParMat<IU,NU1,UDERA> & A, SpParMat<
         int64_t outputMem = outputNNZ * perNNZMem_in * 2;
 
 #ifdef MEMORY
-        if (myrank==0) fprintf(stderr, "[MemEfficientSpGEMM]\t Memory used for kSelect: %ld\n", kselectmem);
-        if (myrank==0) fprintf(stderr, "[MemEfficientSpGEMM]\t Memory used for output: %ld\n", outputMem);
+        if (myrank==0) fprintf(stdout, "[MemEfficientSpGEMM]\t Memory used for kSelect: %ld\n", kselectmem);
+        if (myrank==0) fprintf(stdout, "[MemEfficientSpGEMM]\t Memory used for output: %ld\n", outputMem);
 #endif
         
         //inputMem + outputMem + asquareMem/phases + kselectmem/phases < memory
@@ -528,7 +528,7 @@ SpParMat<IU,NUO,UDERO> MemEfficientSpGEMM (SpParMat<IU,NU1,UDERA> & A, SpParMat<
         }
         
 #ifdef MEMORY
-        if (myrank==0) fprintf(stderr, "[MemEfficientSpGEMM]\t Phases: %d\n", phases);
+        if (myrank==0) fprintf(stdout, "[MemEfficientSpGEMM]\t Phases: %d\n", phases);
 #endif
         
         if(myrank==0)
@@ -3088,10 +3088,10 @@ SpParMat3D<IU,NUO,UDERO> Mult_AnXBn_SUMMA3D(SpParMat3D<IU,NU1,UDER1> & A, SpParM
 
 #ifdef TIMING 
     if(myrank == 0){
-        fprintf(stderr, "[SUMMA3D]\tAbcast_time: %lf\n", Abcast_time);
-        fprintf(stderr, "[SUMMA3D]\tBbcast_time: %lf\n", Bbcast_time);
-        fprintf(stderr, "[SUMMA3D]\tLocal_multiplication_time: %lf\n", Local_multiplication_time);
-        fprintf(stderr, "[SUMMA3D]\tMerge_layer_time: %lf\n", (t3-t2));
+        fprintf(stdout, "[SUMMA3D]\tAbcast_time: %lf\n", Abcast_time);
+        fprintf(stdout, "[SUMMA3D]\tBbcast_time: %lf\n", Bbcast_time);
+        fprintf(stdout, "[SUMMA3D]\tLocal_multiplication_time: %lf\n", Local_multiplication_time);
+        fprintf(stdout, "[SUMMA3D]\tMerge_layer_time: %lf\n", (t3-t2));
     }
 #endif
     /*
@@ -3099,7 +3099,7 @@ SpParMat3D<IU,NUO,UDERO> Mult_AnXBn_SUMMA3D(SpParMat3D<IU,NU1,UDER1> & A, SpParM
      * */
 #ifdef TIMING
     t1 = MPI_Wtime();
-    if(myrank == 0) fprintf(stderr, "[SUMMA3D]\tSUMMA time: %lf\n", (t1-t0));
+    if(myrank == 0) fprintf(stdout, "[SUMMA3D]\tSUMMA time: %lf\n", (t1-t0));
 #endif
     /*
      * 3d-reduction starts
@@ -3168,7 +3168,7 @@ SpParMat3D<IU,NUO,UDERO> Mult_AnXBn_SUMMA3D(SpParMat3D<IU,NU1,UDER1> & A, SpParM
     delete C_tuples;
 #ifdef TIMING
     t3 = MPI_Wtime();
-    if(myrank == 0) fprintf(stderr, "[SUMMA3D]\tAlltoallv: %lf\n", (t3-t2));
+    if(myrank == 0) fprintf(stdout, "[SUMMA3D]\tAlltoallv: %lf\n", (t3-t2));
 #endif
     vector<SpTuples<IU, NUO>*> recvChunks(A.getcommgrid3D()->GetGridLayers());
 #pragma omp parallel for
@@ -3186,7 +3186,7 @@ SpParMat3D<IU,NUO,UDERO> Mult_AnXBn_SUMMA3D(SpParMat3D<IU,NU1,UDER1> & A, SpParM
     
 #ifdef TIMING
     t1 = MPI_Wtime();
-    if(myrank == 0) fprintf(stderr, "[SUMMA3D]\tReduction time: %lf\n", (t1-t0));
+    if(myrank == 0) fprintf(stdout, "[SUMMA3D]\tReduction time: %lf\n", (t1-t0));
 #endif
 #ifdef TIMING
     t0 = MPI_Wtime();
@@ -3197,7 +3197,7 @@ SpParMat3D<IU,NUO,UDERO> Mult_AnXBn_SUMMA3D(SpParMat3D<IU,NU1,UDER1> & A, SpParM
     SpTuples<IU, NUO> * merged_tuples = MultiwayMergeHash<SR, IU, NUO>(recvChunks, recvChunks[0]->getnrow(), recvChunks[0]->getncol(), false, false); // Do not delete
 #ifdef TIMING
     t1 = MPI_Wtime();
-    if(myrank == 0) fprintf(stderr, "[SUMMA3D]\tMerge_fiber_time: %lf\n", (t1-t0));
+    if(myrank == 0) fprintf(stdout, "[SUMMA3D]\tMerge_fiber_time: %lf\n", (t1-t0));
 #endif
     //Create SpDCCol and delete merged_tuples;
     UDERO * localResultant = new UDERO(*merged_tuples, false);
@@ -3288,7 +3288,7 @@ SpParMat3D<IU, NUO, UDERO> MemEfficientSpGEMM3D(SpParMat3D<IU, NU1, UDERA> & A, 
         int64_t k = std::min(int64_t(std::max(selectNum, recoverNum)), d );
 
 #ifdef MEMORY
-        if (myrank==0) fprintf(stderr, "[MemEfficientSpGEMM3D]\t Memory usage per layer: %ld\n", gasquareMem);
+        if (myrank==0) fprintf(stdout, "[MemEfficientSpGEMM3D]\t Memory usage per layer: %ld\n", gasquareMem);
 #endif
 
         //estimate output memory
@@ -3298,8 +3298,8 @@ SpParMat3D<IU, NUO, UDERO> MemEfficientSpGEMM3D(SpParMat3D<IU, NU1, UDERA> & A, 
         int64_t kselectMem = B.GetLayerMat()->getlocalcols() * k * sizeof(NUO) * 3;
 
 #ifdef MEMORY
-        if (myrank==0) fprintf(stderr, "[MemEfficientSpGEMM3D]\t Memory used for kSelect: %ld\n", kselectMem);
-        if (myrank==0) fprintf(stderr, "[MemEfficientSpGEMM3D]\t Memory used for output: %ld\n", postKselectOutputMem);
+        if (myrank==0) fprintf(stdout, "[MemEfficientSpGEMM3D]\t Memory used for kSelect: %ld\n", kselectMem);
+        if (myrank==0) fprintf(stdout, "[MemEfficientSpGEMM3D]\t Memory used for output: %ld\n", postKselectOutputMem);
 #endif
         //inputMem + outputMem + asquareMem/phases + kselectmem/phases < memory
         if(remainingMem > 0){
@@ -3311,7 +3311,7 @@ SpParMat3D<IU, NUO, UDERO> MemEfficientSpGEMM3D(SpParMat3D<IU, NU1, UDERA> & A, 
         MPI_Allreduce(&calculatedPhases, &gCalculatedPhases, 1, MPI_INT, MPI_MAX, A.getcommgrid3D()->GetFiberWorld());
         if(gCalculatedPhases > phases) phases = gCalculatedPhases;
 #ifdef MEMORY
-        if (myrank==0) fprintf(stderr, "[MemEfficientSpGEMM3D]\t Phases: %d\n", phases);
+        if (myrank==0) fprintf(stdout, "[MemEfficientSpGEMM3D]\t Phases: %d\n", phases);
 #endif
     }
     else{
@@ -3526,10 +3526,10 @@ SpParMat3D<IU, NUO, UDERO> MemEfficientSpGEMM3D(SpParMat3D<IU, NU1, UDERA> & A, 
 
 #ifdef TIMING 
         if(myrank == 0){
-            fprintf(stderr, "[MemEfficientSpGEMM3D]\tPhase: %d\tAbcast_time: %lf\n", p, Abcast_time);
-            fprintf(stderr, "[MemEfficientSpGEMM3D]\tPhase: %d\tBbcast_time: %lf\n", p, Bbcast_time);
-            fprintf(stderr, "[MemEfficientSpGEMM3D]\tPhase: %d\tLocal_multiplication_time: %lf\n", p, Local_multiplication_time);
-            fprintf(stderr, "[MemEfficientSpGEMM3D]\tPhase: %d\tSUMMA Merge time: %lf\n", p, (t3-t2));
+            fprintf(stdout, "[MemEfficientSpGEMM3D]\tPhase: %d\tAbcast_time: %lf\n", p, Abcast_time);
+            fprintf(stdout, "[MemEfficientSpGEMM3D]\tPhase: %d\tBbcast_time: %lf\n", p, Bbcast_time);
+            fprintf(stdout, "[MemEfficientSpGEMM3D]\tPhase: %d\tLocal_multiplication_time: %lf\n", p, Local_multiplication_time);
+            fprintf(stdout, "[MemEfficientSpGEMM3D]\tPhase: %d\tSUMMA Merge time: %lf\n", p, (t3-t2));
         }
 #endif
         /*
@@ -3538,7 +3538,7 @@ SpParMat3D<IU, NUO, UDERO> MemEfficientSpGEMM3D(SpParMat3D<IU, NU1, UDERA> & A, 
 #ifdef TIMING
         t1 = MPI_Wtime();
         mcl3d_SUMMAtime += (t1-t0);
-        if(myrank == 0) fprintf(stderr, "[MemEfficientSpGEMM3D]\tPhase: %d\tSUMMA time: %lf\n", p, (t1-t0));
+        if(myrank == 0) fprintf(stdout, "[MemEfficientSpGEMM3D]\tPhase: %d\tSUMMA time: %lf\n", p, (t1-t0));
 #endif
 
         /*
@@ -3571,7 +3571,7 @@ SpParMat3D<IU, NUO, UDERO> MemEfficientSpGEMM3D(SpParMat3D<IU, NU1, UDERA> & A, 
         LIC totsend = C_tuples->getnnz();
 #ifdef TIMING
         t3 = MPI_Wtime();
-        if(myrank == 0) fprintf(stderr, "[MemEfficientSpGEMM3D]\tPhase: %d\tAllocation of alltoall information: %lf\n", p, (t3-t2));
+        if(myrank == 0) fprintf(stdout, "[MemEfficientSpGEMM3D]\tPhase: %d\tAllocation of alltoall information: %lf\n", p, (t3-t2));
 #endif
         
 #ifdef TIMING
@@ -3594,7 +3594,7 @@ SpParMat3D<IU, NUO, UDERO> MemEfficientSpGEMM3D(SpParMat3D<IU, NU1, UDERA> & A, 
         std::partial_sum(sendcnt, sendcnt+A.getcommgrid3D()->GetGridLayers()-1, sdispls+1);
 #ifdef TIMING
         t3 = MPI_Wtime();
-        if(myrank == 0) fprintf(stderr, "[MemEfficientSpGEMM3D]\tPhase: %d\tGetting Alltoall data ready: %lf\n", p, (t3-t2));
+        if(myrank == 0) fprintf(stdout, "[MemEfficientSpGEMM3D]\tPhase: %d\tGetting Alltoall data ready: %lf\n", p, (t3-t2));
 #endif
 
         // Send profile ready. Now need to update the tuples to reflect correct column id after column split.
@@ -3609,7 +3609,7 @@ SpParMat3D<IU, NUO, UDERO> MemEfficientSpGEMM3D(SpParMat3D<IU, NU1, UDERA> & A, 
         }
 #ifdef TIMING
         t3 = MPI_Wtime();
-        if(myrank == 0) fprintf(stderr, "[MemEfficientSpGEMM3D]\tPhase: %d\tGetting Alltoallv data ready: %lf\n", p, (t3-t2));
+        if(myrank == 0) fprintf(stdout, "[MemEfficientSpGEMM3D]\tPhase: %d\tGetting Alltoallv data ready: %lf\n", p, (t3-t2));
 #endif
 
 #ifdef TIMING
@@ -3618,7 +3618,7 @@ SpParMat3D<IU, NUO, UDERO> MemEfficientSpGEMM3D(SpParMat3D<IU, NU1, UDERA> & A, 
         MPI_Alltoall(sendprfl, 3, MPI_INT, recvprfl, 3, MPI_INT, A.getcommgrid3D()->GetFiberWorld());
 #ifdef TIMING
         t3 = MPI_Wtime();
-        if(myrank == 0) fprintf(stderr, "[MemEfficientSpGEMM3D]\tPhase: %d\tAlltoall: %lf\n", p, (t3-t2));
+        if(myrank == 0) fprintf(stdout, "[MemEfficientSpGEMM3D]\tPhase: %d\tAlltoall: %lf\n", p, (t3-t2));
 #endif
 #ifdef TIMING
         t2 = MPI_Wtime();
@@ -3629,7 +3629,7 @@ SpParMat3D<IU, NUO, UDERO> MemEfficientSpGEMM3D(SpParMat3D<IU, NU1, UDERA> & A, 
         std::tuple<LIC,LIC,NUO>* recvTuples = static_cast<std::tuple<LIC,LIC,NUO>*> (::operator new (sizeof(std::tuple<LIC,LIC,NUO>[totrecv])));
 #ifdef TIMING
         t3 = MPI_Wtime();
-        if(myrank == 0) fprintf(stderr, "[MemEfficientSpGEMM3D]\tPhase: %d\tAllocation of receive data: %lf\n", p, (t3-t2));
+        if(myrank == 0) fprintf(stdout, "[MemEfficientSpGEMM3D]\tPhase: %d\tAllocation of receive data: %lf\n", p, (t3-t2));
 #endif
 
 #ifdef TIMING
@@ -3639,7 +3639,7 @@ SpParMat3D<IU, NUO, UDERO> MemEfficientSpGEMM3D(SpParMat3D<IU, NU1, UDERA> & A, 
         delete C_tuples;
 #ifdef TIMING
         t3 = MPI_Wtime();
-        if(myrank == 0) fprintf(stderr, "[MemEfficientSpGEMM3D]\tPhase: %d\tAlltoallv: %lf\n", p, (t3-t2));
+        if(myrank == 0) fprintf(stdout, "[MemEfficientSpGEMM3D]\tPhase: %d\tAlltoallv: %lf\n", p, (t3-t2));
 #endif
 #ifdef TIMING
         t2 = MPI_Wtime();
@@ -3651,7 +3651,7 @@ SpParMat3D<IU, NUO, UDERO> MemEfficientSpGEMM3D(SpParMat3D<IU, NU1, UDERA> & A, 
         }
 #ifdef TIMING
         t3 = MPI_Wtime();
-        if(myrank == 0) fprintf(stderr, "[MemEfficientSpGEMM3D]\tPhase: %d\trecvChunks creation: %lf\n", p, (t3-t2));
+        if(myrank == 0) fprintf(stdout, "[MemEfficientSpGEMM3D]\tPhase: %d\trecvChunks creation: %lf\n", p, (t3-t2));
 #endif
 
 #ifdef TIMING
@@ -3663,7 +3663,7 @@ SpParMat3D<IU, NUO, UDERO> MemEfficientSpGEMM3D(SpParMat3D<IU, NU1, UDERA> & A, 
         MPI_Type_free(&MPI_tuple);
 #ifdef TIMING
         t3 = MPI_Wtime();
-        if(myrank == 0) fprintf(stderr, "[MemEfficientSpGEMM3D]\tPhase: %d\tMemory freeing: %lf\n", p, (t3-t2));
+        if(myrank == 0) fprintf(stdout, "[MemEfficientSpGEMM3D]\tPhase: %d\tMemory freeing: %lf\n", p, (t3-t2));
 #endif
         /*
          * 3d-reduction ends 
@@ -3672,7 +3672,7 @@ SpParMat3D<IU, NUO, UDERO> MemEfficientSpGEMM3D(SpParMat3D<IU, NU1, UDERA> & A, 
 #ifdef TIMING
         t1 = MPI_Wtime();
         mcl3d_reductiontime += (t1-t0);
-        if(myrank == 0) fprintf(stderr, "[MemEfficientSpGEMM3D]\tPhase: %d\tReduction time: %lf\n", p, (t1-t0));
+        if(myrank == 0) fprintf(stdout, "[MemEfficientSpGEMM3D]\tPhase: %d\tReduction time: %lf\n", p, (t1-t0));
 #endif
 #ifdef TIMING
         t0 = MPI_Wtime();
@@ -3687,7 +3687,7 @@ SpParMat3D<IU, NUO, UDERO> MemEfficientSpGEMM3D(SpParMat3D<IU, NU1, UDERA> & A, 
 #ifdef TIMING
         t1 = MPI_Wtime();
         mcl3d_3dmergetime += (t1-t0);
-        if(myrank == 0) fprintf(stderr, "[MemEfficientSpGEMM3D]\tPhase: %d\t3D Merge time: %lf\n", p, (t1-t0));
+        if(myrank == 0) fprintf(stdout, "[MemEfficientSpGEMM3D]\tPhase: %d\t3D Merge time: %lf\n", p, (t1-t0));
 #endif
         /*
          * 3d-merge ends
@@ -3712,11 +3712,11 @@ SpParMat3D<IU, NUO, UDERO> MemEfficientSpGEMM3D(SpParMat3D<IU, NU1, UDERA> & A, 
 #ifdef TIMING
         t1 = MPI_Wtime();
         mcl3d_kselecttime += (t1-t0);
-        if(myrank == 0) fprintf(stderr, "[MemEfficientSpGEMM3D]\tPhase: %d\tMCLPruneRecoverySelect time: %lf\n",p, (t1-t0));
+        if(myrank == 0) fprintf(stdout, "[MemEfficientSpGEMM3D]\tPhase: %d\tMCLPruneRecoverySelect time: %lf\n",p, (t1-t0));
 #endif
         toconcatenate.push_back(phaseResultantLayer.seq());
 #ifdef TIMING
-        if(myrank == 0) fprintf(stderr, "***\n");
+        if(myrank == 0) fprintf(stdout, "***\n");
 #endif
     }
     for(int i = 0; i < PiecesOfB.size(); i++) delete PiecesOfB[i];
