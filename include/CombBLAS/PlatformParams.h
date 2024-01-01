@@ -6,6 +6,7 @@
 
 namespace combblas {
 
+namespace autotuning {
 /* 
  * TODO: Topology specific params
  * TODO: intrasocket,intranode alpha/beta
@@ -42,4 +43,5 @@ private:
     
 };
 
+} //autotuning
 }//combblas

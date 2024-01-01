@@ -21,7 +21,7 @@ int main(int argc, char ** argv) {
     float dummyAlpha = 0.1;
     int cores = 128;
     int devs = 4;
-    PlatformParams params(dummyAlpha, dummyBeta, cores, devs);
+    autotuning::PlatformParams params(dummyAlpha, dummyBeta, cores, devs);
     
     std::string matname(argv[1]);
     
@@ -41,7 +41,9 @@ int main(int argc, char ** argv) {
     A.ParallelReadMM(matname, true, maximum<double>());
     SpParMat<IT,UT,DER> B(A);
 
-    AutotunerSpGEMM3D<IT,UT,DER,IT,UT,DER> tuner(params, A, B);
+    autotuning::AutotunerSpGEMM3D tuner(params, autotuning::M_SLURM);
+    
+    tuner.Tune(A, B);
 
     return 0;
 
