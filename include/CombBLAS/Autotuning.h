@@ -79,7 +79,6 @@ private:
     PlatformParams params;
     AMat A; BMat B;
     std::shared_ptr<CommGrid> grid2D;
-    
 
 };
 
