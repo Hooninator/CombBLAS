@@ -37,6 +37,8 @@
 
 
 
+#define ATIMING
+
 namespace combblas {
 
 
@@ -104,6 +106,9 @@ public:
                 throw std::runtime_error("Invalid job manager " + jobManager);
             }
         } 
+        
+        MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+        MPI_Comm_size(MPI_COMM_WORLD, &worldSize);
 
     }
     
@@ -126,6 +131,9 @@ public:
                 throw std::runtime_error("Invalid job manager " + jobManager);
             }
         } 
+
+        MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+        MPI_Comm_size(MPI_COMM_WORLD, &worldSize);
 
     }
     
@@ -188,7 +196,7 @@ public:
         
         SpGEMM3DParams tunableParams; 
         
-        /* TODO: Efficient parameter space searching method */
+        tunableParams = SearchNaive(A,B,grid);
 
     }
 
@@ -196,7 +204,42 @@ public:
     template <typename AIT, typename ANT, typename ADER, typename BIT, typename BNT, typename BDER>
     SpGEMM3DParams TuneGPU() {/*TODO*/}
 
+    
+    /* Brute force search. Explicitly creates 3D comm grid for each paramter combo */
+    template <typename AIT, typename ANT, typename ADER, typename BIT, typename BNT, typename BDER>
+    SpGEMM3DParams SearchNaive(SpParMat<AIT, ANT, ADER>& A, SpParMat<BIT, BNT, BDER>& B, std::shared_ptr<CommGrid> grid) {
+        
+#ifdef ATIMING
+    auto stime1 = MPI_Wtime();
+#endif
+    
+    
 
+#ifdef ATIMING
+    auto etime1 = MPI_Wtime();
+    if (rank==0) std::cout<<"[SearchNaive] Total time: "<<(etime1-stime1)<<"s"<<std::endl;
+#endif
+    
+    }
+    
+    
+    /* Brute force search in parallel. Explicitly creates 3D comm grid for each paramter combo */
+    template <typename AIT, typename ANT, typename ADER, typename BIT, typename BNT, typename BDER>
+    SpGEMM3DParams ParallelSearchNaive(SpParMat<AIT, ANT, ADER>& A, SpParMat<BIT, BNT, BDER>& B, std::shared_ptr<CommGrid> grid) {
+        
+#ifdef ATIMING
+    auto stime1 = MPI_Wtime();
+#endif
+    
+    
+
+#ifdef ATIMING
+    auto etime1 = MPI_Wtime();
+    if (rank==0) std::cout<<"[SearchNaive] Total time: "<<(etime1-stime1)<<"s"<<std::endl;
+#endif
+    
+    }
+    
     
     /* RUNTIME ESTIMATION */
     
@@ -217,6 +260,8 @@ public:
     double MergeFiberTime(){return 0;} 
     
     
+    int GetRank() const {return rank;}
+    int GetWorldSize() const {return worldSize;}
     
     /* UTILITY FUNCTIONS */
 
@@ -230,6 +275,7 @@ public:
 private:
     PlatformParams platformParams;
     JobInfo jobInfo;
+    int rank; int worldSize;
 
 };//AutotunerSpGEMM3D
 

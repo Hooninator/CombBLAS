@@ -9,6 +9,9 @@
 #include "CombBLAS/ParFriends.h"
 #include "CombBLAS/Autotuning.h"
 
+#define DEBUG
+#define ATIMING
+
 using namespace combblas;
 
 int main(int argc, char ** argv) {
@@ -17,18 +20,20 @@ int main(int argc, char ** argv) {
     
     assert(argc>1);
     
+    int rank; int n;
+    MPI_Init(&argc, &argv);
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &n);
+
     float dummyBeta = 1.0;
     float dummyAlpha = 0.1;
     int cores = 128;
     int devs = 4;
     autotuning::PlatformParams params(dummyAlpha, dummyBeta, cores, devs);
+    autotuning::AutotunerSpGEMM3D tuner(params, autotuning::M_SLURM);
     
     std::string matname(argv[1]);
     
-    int rank; int n;
-    MPI_Init(&argc, &argv);
-    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-    MPI_Comm_size(MPI_COMM_WORLD, &n);
     
     std::shared_ptr<CommGrid> grid;
     grid.reset(new CommGrid(MPI_COMM_WORLD,0,0));
@@ -41,7 +46,6 @@ int main(int argc, char ** argv) {
     A.ParallelReadMM(matname, true, maximum<double>());
     SpParMat<IT,UT,DER> B(A);
 
-    autotuning::AutotunerSpGEMM3D tuner(params, autotuning::M_SLURM);
     
     tuner.Tune(A, B);
 
