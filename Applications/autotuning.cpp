@@ -28,8 +28,10 @@ int main(int argc, char ** argv) {
     float dummyAlpha = 0.1;
     int cores = 128;
     int devs = 4;
+    
+    autotuning::Init(autotuning::M_SLURM);
     autotuning::PlatformParams params(dummyAlpha, dummyBeta, cores, devs);
-    autotuning::Autotuner tuner(params, autotuning::M_SLURM);
+    autotuning::Autotuner tuner(params);
     
     std::string matname(argv[1]);
     
@@ -47,7 +49,7 @@ int main(int argc, char ** argv) {
 
     
     auto resultParams = tuner.TuneSpGEMM3D(A, B, autotuning::BRUTE_FORCE);
-    auto tunedGrid = tuner.MakeGridFromParams(resultParams);
+    auto tunedGrid = resultParams.MakeGridFromParams();
 
     return 0;
 
