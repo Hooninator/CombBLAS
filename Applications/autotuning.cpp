@@ -9,7 +9,6 @@
 #include "CombBLAS/ParFriends.h"
 #include "CombBLAS/Autotuning.h"
 
-#define DEBUG
 #define ATIMING
 
 using namespace combblas;
@@ -30,7 +29,7 @@ int main(int argc, char ** argv) {
     int cores = 128;
     int devs = 4;
     autotuning::PlatformParams params(dummyAlpha, dummyBeta, cores, devs);
-    autotuning::AutotunerSpGEMM3D tuner(params, autotuning::M_SLURM);
+    autotuning::Autotuner tuner(params, autotuning::M_SLURM);
     
     std::string matname(argv[1]);
     
@@ -47,7 +46,8 @@ int main(int argc, char ** argv) {
     SpParMat<IT,UT,DER> B(A);
 
     
-    tuner.Tune(A, B);
+    auto resultParams = tuner.TuneSpGEMM3D(A, B, autotuning::BRUTE_FORCE);
+    auto tunedGrid = tuner.MakeGridFromParams(resultParams);
 
     return 0;
 

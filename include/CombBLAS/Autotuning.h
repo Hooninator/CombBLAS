@@ -52,6 +52,9 @@ namespace combblas {
 namespace autotuning {
 
 
+void Init() {
+    //TODO: rank, local rank, debugptr, jobInfo should all be moved here
+}
 
 
 enum JobManager {
@@ -107,59 +110,103 @@ public:
 };    
 
 
-template <typename T>
-class SearchSpace {
-
-
+template <typename AIT, typename ANT, typename ADER, typename BIT, typename BNT, typename BDER>
+class SpGEMM3DInput {
+public:
+    SpParMat<AIT, ANT, ADER>& A;
+    SpParMat<BIT, BNT, BDER>& B;
 };
 
+/* Output of tune routine. Relevant SpGEMM3D params that should be used to create a CommGrid3D */
+class SpGEMM3DParams {
+public:
+    
+    SpGEMM3DParams(){}    
+
+    SpGEMM3DParams(int nodes, int ppn, int layers):
+    nodes(nodes), ppn(ppn), layers(layers) {}
+    
+    void print() {
+        std::cout<< "(Nodes: "<<nodes<<", PPN: "<<ppn<<", Layers: "<<layers<<")"<<std::endl;
+    }
+    
+    std::string outStr() {
+        std::stringstream ss;
+        ss<< "(Nodes: "<<nodes<<", PPN: "<<ppn<<", Layers: "<<layers<<")"<<std::endl;
+        return ss.str();
+    }
+
+
+    static std::vector<SpGEMM3DParams> ConstructSearchSpace(JobInfo jobInfo) {
+        std::vector<SpGEMM3DParams> result;
+        for (int _nodes = 1; _nodes<=jobInfo.nodes; _nodes*=2) {
+            for (int _ppn=1; _ppn<=jobInfo.tasksPerNode; _ppn*=2) {
+                if (IsPerfectSquare(_ppn*_nodes)) {
+                    for (int _layers=1; _layers<=_ppn*_nodes; _layers*=2) {
+                        int gridSize = (_ppn*_nodes) / _layers;
+                        if (IsPerfectSquare(gridSize))
+                            result.push_back(SpGEMM3DParams(_nodes,_ppn,_layers));
+                    }
+                }
+            }
+        }
+        return result;
+    }
+
+    /* Get runtime estimate of a certain combo of parameters */    
+    template <typename AIT, typename ANT, typename ADER, typename BIT, typename BNT, typename BDER>
+    double EstimateRuntime(SpGEMM3DInput<AIT,ANT,ADER,BIT,BNT,BDER> input, PlatformParams platformParams) {
+        /* TODO */
+        return 0;
+    }
+
+    /* Time estimates for each step of 3D SpGEMM */    
+    /* TODO: All of these */
+    double ABcastTime(){return 0;}
+    double BBcastTime(){return 0;}
+    double LocalMultTime(){return 0;}
+    double LayerMergeTime(){return 0;}
+    double AlltoAllTime(){return 0;}
+    double MergeFiberTime(){return 0;} 
+
+    /* UTILITY FUNCTIONS */
+
+    //TODO: Move this
+    static bool IsPerfectSquare(int num) {
+        int root = static_cast<int>(sqrt(num));
+        return root*root==num;
+    }
+
+    int nodes;
+    int ppn;
+    int layers; 
+}; 
 
 
 
-class AutotunerSpGEMM3D {
+enum TuningMethod {
+    BRUTE_FORCE
+}typedef TuningMethod;
+
+class Autotuner {
 
 public:
     
-    /* Output of tune routine. Struct of relevant SpGEMM3D params that should be used to create a CommGrid3D */
-    class SpGEMM3DParams {
-    public:
-        
-        SpGEMM3DParams(int nodes, int ppn, int layers):
-        nodes(nodes), ppn(ppn), layers(layers) {}
-        
-        void print() {
-            std::cout<< "(Nodes: "<<nodes<<", PPN: "<<ppn<<", Layers: "<<layers<<")"<<std::endl;
-        }
-        
-        std::string outStr() {
-            std::stringstream ss;
-            ss<< "(Nodes: "<<nodes<<", PPN: "<<ppn<<", Layers: "<<layers<<")"<<std::endl;
-            return ss.str();
-        }
-
-        int nodes;
-        int ppn;
-        int layers; 
-    }; 
     
     /* CONSTRUCTORS */
     
     //Calls measuring routines to create PlatformParams instance
-    AutotunerSpGEMM3D(JobManager jobManager):
+    Autotuner(JobManager jobManager):
     platformParams(PlatformParams()), jobInfo(JobInfo(jobManager)) 
     {
         SetMPIInfo();
-        Debugger _debugger(rank);
-        debugger = _debugger;
     }
     
     // Assumes PlatformParams has already been constructed
-    AutotunerSpGEMM3D(PlatformParams& params, JobManager jobManager):
+    Autotuner(PlatformParams& params, JobManager jobManager):
     platformParams(params), jobInfo(JobInfo(jobManager))
     {
         SetMPIInfo(); 
-        Debugger _debugger(rank);
-        debugger = _debugger;
     }
     
     
@@ -182,25 +229,58 @@ public:
 
     
     /* TUNING */
+    
 
     /* Main tuning routine for CPU 3DSpGEMM */
     template <typename AIT, typename ANT, typename ADER, typename BIT, typename BNT, typename BDER>
-    std::shared_ptr<CommGrid3D> Tune(SpParMat<AIT, ANT, ADER>& A, SpParMat<BIT, BNT, BDER>& B){
+    SpGEMM3DParams TuneSpGEMM3D(SpParMat<AIT, ANT, ADER>& A, SpParMat<BIT, BNT, BDER>& B, TuningMethod method){
         
         auto grid = A.getcommgrid(); 
         
-        SpGEMM3DParams resultParams = SearchNaive(A,B,grid); 
+        SpGEMM3DInput<AIT,ANT,ADER,BIT,BNT,BDER> inputs{A,B};
         
-        auto resultGrid = MakeGridFromParams(resultParams);
+        SpGEMM3DParams resultParams; 
         
-        return resultGrid;
+        switch(method) {
+            case BRUTE_FORCE:
+            {
+                resultParams = SearchBruteForce<SpGEMM3DParams>(inputs,grid); 
+                break;
+            }
+            default:
+            {
+                break;
+            }
+        }        
+
+        return resultParams;
 
     }
 
     /* Main tuning routine for GPU 3DSpGEMM */
     template <typename AIT, typename ANT, typename ADER, typename BIT, typename BNT, typename BDER>
-    std::shared_ptr<CommGrid3D> TuneGPU() {/*TODO*/}
+    SpGEMM3DParams TuneSpGEMM3DGPU() {/*TODO*/}
 
+    
+    template <typename P, typename I>
+    P SearchBruteForce(I input, std::shared_ptr<CommGrid> grid) {
+        auto searchSpace = P::ConstructSearchSpace(jobInfo);
+        ASSERT(searchSpace.size()>0, "Search space is of size 0!");
+
+        P bestParams = searchSpace[0]; 
+        double bestTime = bestParams.EstimateRuntime(input, platformParams); 
+
+        for (P& currParams : searchSpace) {
+            double currTime = currParams.EstimateRuntime(input, platformParams);
+            if (currTime<bestTime) {
+                bestTime = currTime;
+                bestParams = currParams;
+            }
+        }
+        
+        return bestParams;
+    }
+    
 
     /* Given a set of parameters, construct a 3D processor grid from a communicator that only contains the processes
      * with local ranks < ppn on nodes < n
@@ -236,165 +316,30 @@ public:
 
     }
     
-
-    /* SEARCH SPACE EXPLORATION */
-    
-
-
-    /* Return all powers of 2 node counts up to the number of nodes allocated to the job */
-    std::vector<int> GetValidNNodes() {
-        int i=0;
-        std::vector<int> nodesVec(static_cast<int>(log2(jobInfo.nodes))+1);
-        std::generate(nodesVec.begin(), nodesVec.end(), [&i]() mutable {return pow(2, i++);});
-        return nodesVec;
-    }
-
-    
-    /* Given node count, return valid PPN values. Valid if perfect square number of tasks */
-    std::vector<int> GetValidPPNs(int nodes) {
-        std::vector<int> ppnVec;
-        ppnVec.reserve(static_cast<int>(log2(jobInfo.tasksPerNode)));
-        for(int ppn=1; ppn<=jobInfo.tasksPerNode; ppn*=2) {
-            if (IsPerfectSquare(ppn*nodes)) {
-                ppnVec.push_back(ppn);
-            }
-        }
-        return ppnVec;
-    }
-
-    
-    /* Given node count and ppn value, return all valid values for the layers param. 
-     * A value for the layers param is valid if the 2D grids are perfect squares.
-     */
-    std::vector<int> GetValidNLayers(int ppn, int nodes) {
-        int ntasks = ppn*nodes;
-        std::vector<int> layerVec;
-        layerVec.reserve(static_cast<int>(log2(ntasks)));
-        for (int l=2; l<=ntasks; l*=2) {
-            int gridSize = ntasks / l;
-            if (IsPerfectSquare(gridSize)) {
-                layerVec.push_back(l);
-            }
-        }
-        return layerVec;
-    }
-    
-    /* Brute force search. Explicitly creates 3D comm grid for each paramter combo */
-    template <typename AIT, typename ANT, typename ADER, typename BIT, typename BNT, typename BDER>
-    SpGEMM3DParams SearchNaive(SpParMat<AIT, ANT, ADER>& A, SpParMat<BIT, BNT, BDER>& B, std::shared_ptr<CommGrid> grid) {
-        
-#ifdef ATIMING
-    auto stime1 = MPI_Wtime();
-#endif
-    
-    size_t searchSize = 0;
-    SpGEMM3DParams minParams {jobInfo.nodes, jobInfo.tasksPerNode, 1};
-    double minTime = EstimateRuntime(A, B, minParams);
-
-    auto nodesVec = GetValidNNodes();
-
-    for (auto const& nodes : nodesVec) {
-
-        auto ppnVec = GetValidPPNs(nodes);
-
-        for (auto const& ppn : ppnVec) {
-
-            auto layerVec = GetValidNLayers(ppn, nodes);
-
-            for (auto const& layer : layerVec) {
-
-                SpGEMM3DParams currParams {nodes, ppn, layer};
-                double currTime = EstimateRuntime(A,B,currParams);
-                if (currTime<minTime) minParams = currParams;                
-                searchSize+=1;
-
-            }
-        }
-    } 
-
-#ifdef ATIMING
-    auto etime1 = MPI_Wtime();
-    if (rank==0) std::cout<<"[SearchNaive] Total time: "<<(etime1-stime1)<<"s"<<std::endl;
-    if (rank==0) std::cout<<"[SearchNaive] Search size: "<<searchSize<<std::endl;
-#endif
-    
-    return minParams;
-    
-    }
-    
-    
-    /* Brute force search in parallel. Explicitly creates 3D comm grid for each paramter combo */
-    template <typename AIT, typename ANT, typename ADER, typename BIT, typename BNT, typename BDER>
-    SpGEMM3DParams ParallelSearchNaive(SpParMat<AIT, ANT, ADER>& A, SpParMat<BIT, BNT, BDER>& B, std::shared_ptr<CommGrid> grid) {
-        
-#ifdef ATIMING
-    auto stime1 = MPI_Wtime();
-#endif
-    
-    
-
-#ifdef ATIMING
-    auto etime1 = MPI_Wtime();
-    if (rank==0) std::cout<<"[ParallelSearchNaive] Total time: "<<(etime1-stime1)<<"s"<<std::endl;
-#endif
-    
-    }
-    
-    
-    /* RUNTIME ESTIMATION */
-    
-    /* Get runtime estimate of a certain combo of parameters */    
-    template <typename AIT, typename ANT, typename ADER, typename BIT, typename BNT, typename BDER>
-    double EstimateRuntime(SpParMat<AIT, ANT, ADER>& A, SpParMat<BIT, BNT, BDER>& B, SpGEMM3DParams params) {
-        /* TODO */
-        MakeGridFromParams(params);
-        return 0;
-    }
-
-    /* Time estimates for each step of 3D SpGEMM */    
-    /* TODO: All of these */
-    double ABcastTime(){return 0;}
-    double BBcastTime(){return 0;}
-    double LocalMultTime(){return 0;}
-    double LayerMergeTime(){return 0;}
-    double AlltoAllTime(){return 0;}
-    double MergeFiberTime(){return 0;} 
-    
     
     int GetRank() const {return rank;}
     int GetLocalRank() const {return localRank;}
     int GetWorldSize() const {return worldSize;}
     
-    void Print(std::string msg) {
-#ifdef DEBUG
-    debugger.Print(msg);
-#endif
-    }
-    
-    void Log(std::string msg) {
-#ifdef DEBUG
-    debugger.Log(msg);
-#endif
-    }
     
     /* UTILITY FUNCTIONS */
 
+    //TODO: Move this
     bool IsPerfectSquare(int num) {
         int root = static_cast<int>(sqrt(num));
         return root*root==num;
     }
     
 
-    ~AutotunerSpGEMM3D(){}
+    ~Autotuner(){}
 
 private:
     PlatformParams platformParams;
     JobInfo jobInfo;
     int rank; int worldSize;
     int localRank;
-    Debugger debugger;
 
-};//AutotunerSpGEMM3D
+};//Autotuner
 
 
 }//autotuning
