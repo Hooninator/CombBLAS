@@ -52,11 +52,6 @@ namespace combblas {
 namespace autotuning {
 
 
-void Init() {
-    //TODO: rank, local rank, debugptr, jobInfo should all be moved here
-}
-
-
 enum JobManager {
     M_SLURM
 } typedef JobManager;
@@ -110,6 +105,37 @@ public:
 };    
 
 
+//Global variables
+
+int rank; int worldSize;
+int localRank;
+bool initCalled = false;
+
+Debugger *debugPtr = nullptr;
+JobInfo *jobPtr = nullptr;
+
+void Init(JobManager jm) {
+    
+    int initialized;
+    MPI_Initialized(&initialized);
+    ASSERT(initialized==1, "Please call MPI_Init() before calling this method");
+    
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &worldSize);
+
+    MPI_Comm localComm;
+    MPI_Comm_split_type(MPI_COMM_WORLD, MPI_COMM_TYPE_SHARED, rank, MPI_INFO_NULL, &localComm);
+    MPI_Comm_rank(localComm, &localRank);
+    
+    debugPtr = new Debugger(rank);
+    jobPtr = new JobInfo(jm);
+    
+    initCalled = true;
+}
+
+
+
+
 template <typename AIT, typename ANT, typename ADER, typename BIT, typename BNT, typename BDER>
 class SpGEMM3DInput {
 public:
@@ -123,12 +149,15 @@ public:
     
     SpGEMM3DParams(){}    
 
+
     SpGEMM3DParams(int nodes, int ppn, int layers):
     nodes(nodes), ppn(ppn), layers(layers) {}
+
     
     void print() {
         std::cout<< "(Nodes: "<<nodes<<", PPN: "<<ppn<<", Layers: "<<layers<<")"<<std::endl;
     }
+
     
     std::string outStr() {
         std::stringstream ss;
@@ -137,10 +166,10 @@ public:
     }
 
 
-    static std::vector<SpGEMM3DParams> ConstructSearchSpace(JobInfo jobInfo) {
+    static std::vector<SpGEMM3DParams> ConstructSearchSpace() {
         std::vector<SpGEMM3DParams> result;
-        for (int _nodes = 1; _nodes<=jobInfo.nodes; _nodes*=2) {
-            for (int _ppn=1; _ppn<=jobInfo.tasksPerNode; _ppn*=2) {
+        for (int _nodes = 1; _nodes<=jobPtr->nodes; _nodes*=2) {
+            for (int _ppn=1; _ppn<=jobPtr->tasksPerNode; _ppn*=2) {
                 if (IsPerfectSquare(_ppn*_nodes)) {
                     for (int _layers=1; _layers<=_ppn*_nodes; _layers*=2) {
                         int gridSize = (_ppn*_nodes) / _layers;
@@ -153,12 +182,14 @@ public:
         return result;
     }
 
+
     /* Get runtime estimate of a certain combo of parameters */    
     template <typename AIT, typename ANT, typename ADER, typename BIT, typename BNT, typename BDER>
     double EstimateRuntime(SpGEMM3DInput<AIT,ANT,ADER,BIT,BNT,BDER> input, PlatformParams platformParams) {
         /* TODO */
         return 0;
     }
+
 
     /* Time estimates for each step of 3D SpGEMM */    
     /* TODO: All of these */
@@ -169,13 +200,51 @@ public:
     double AlltoAllTime(){return 0;}
     double MergeFiberTime(){return 0;} 
 
+
+    /* Given a set of parameters, construct a 3D processor grid from a communicator that only contains the processes
+     * with local ranks < ppn on nodes < n
+     */
+    std::shared_ptr<CommGrid3D> MakeGridFromParams() {
+        int nodeRank = (autotuning::rank / jobPtr->tasksPerNode);
+        int color = static_cast<int>(nodeRank < nodes && autotuning::localRank < ppn);
+        int key = autotuning::rank;
+        
+        MPI_Comm newComm;
+        MPI_Comm_split(MPI_COMM_WORLD, color, key, &newComm);
+        
+        int newSize;
+        MPI_Comm_size(newComm, &newSize);
+
+        if (color==1) {
+
+            ASSERT(newSize==nodes*ppn, 
+            "Expected communicator size to be " + std::to_string(nodes*ppn) + ", but it was " 
+            + std::to_string(newSize));
+
+            ASSERT(IsPerfectSquare(newSize / layers), 
+            "Each 2D grid must be a perfect square, instead got " + outStr());
+            
+            std::shared_ptr<CommGrid3D> newGrid;
+            newGrid.reset(new CommGrid3D(newComm, layers, 0, 0));
+            
+            return newGrid;
+
+        } else {
+            return NULL;
+        }
+
+    }
+
+
     /* UTILITY FUNCTIONS */
 
-    //TODO: Move this
     static bool IsPerfectSquare(int num) {
         int root = static_cast<int>(sqrt(num));
         return root*root==num;
     }
+
+
+    /* Parameters */
 
     int nodes;
     int ppn;
@@ -196,31 +265,15 @@ public:
     /* CONSTRUCTORS */
     
     //Calls measuring routines to create PlatformParams instance
-    Autotuner(JobManager jobManager):
-    platformParams(PlatformParams()), jobInfo(JobInfo(jobManager)) 
-    {
-        SetMPIInfo();
+    Autotuner(): platformParams(PlatformParams()) {
+        ASSERT(initCalled, "Please call autotuning::Init() first.");
     }
     
+
     // Assumes PlatformParams has already been constructed
-    Autotuner(PlatformParams& params, JobManager jobManager):
-    platformParams(params), jobInfo(JobInfo(jobManager))
-    {
-        SetMPIInfo(); 
+    Autotuner(PlatformParams& params): platformParams(params) {
+        ASSERT(initCalled, "Please call autotuning::Init() first.");
     }
-    
-    
-    void SetMPIInfo() {
-
-        MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-        MPI_Comm_size(MPI_COMM_WORLD, &worldSize);
-
-        MPI_Comm localComm;
-        MPI_Comm_split_type(MPI_COMM_WORLD, MPI_COMM_TYPE_SHARED, rank, MPI_INFO_NULL, &localComm);
-        MPI_Comm_rank(localComm, &localRank);
-
-    }
-    
     
     
     //TODO: Need member functions that estimate nnz per proc in 3D grid without actually creating the 3D grid
@@ -257,6 +310,7 @@ public:
 
     }
 
+
     /* Main tuning routine for GPU 3DSpGEMM */
     template <typename AIT, typename ANT, typename ADER, typename BIT, typename BNT, typename BDER>
     SpGEMM3DParams TuneSpGEMM3DGPU() {/*TODO*/}
@@ -264,7 +318,7 @@ public:
     
     template <typename P, typename I>
     P SearchBruteForce(I input, std::shared_ptr<CommGrid> grid) {
-        auto searchSpace = P::ConstructSearchSpace(jobInfo);
+        auto searchSpace = P::ConstructSearchSpace();
         ASSERT(searchSpace.size()>0, "Search space is of size 0!");
 
         P bestParams = searchSpace[0]; 
@@ -282,62 +336,10 @@ public:
     }
     
 
-    /* Given a set of parameters, construct a 3D processor grid from a communicator that only contains the processes
-     * with local ranks < ppn on nodes < n
-     */
-    std::shared_ptr<CommGrid3D> MakeGridFromParams(SpGEMM3DParams params) {
-        int nodeRank = (rank / jobInfo.tasksPerNode);
-        int color = static_cast<int>(nodeRank < params.nodes && localRank < params.ppn);
-        int key = rank;
-        
-        MPI_Comm newComm;
-        MPI_Comm_split(MPI_COMM_WORLD, color, key, &newComm);
-        
-        int newSize;
-        MPI_Comm_size(newComm, &newSize);
-
-        if (color==1) {
-
-            ASSERT(newSize==params.nodes*params.ppn, 
-            "Expected communicator size to be " + std::to_string(params.nodes*params.ppn) + ", but it was " 
-            + std::to_string(newSize));
-
-            ASSERT(IsPerfectSquare(newSize / params.layers), 
-            "Each 2D grid must be a perfect square, instead got " + params.outStr());
-            
-            std::shared_ptr<CommGrid3D> newGrid;
-            newGrid.reset(new CommGrid3D(newComm, params.layers, 0, 0));
-            
-            return newGrid;
-
-        } else {
-            return NULL;
-        }
-
-    }
-    
-    
-    int GetRank() const {return rank;}
-    int GetLocalRank() const {return localRank;}
-    int GetWorldSize() const {return worldSize;}
-    
-    
-    /* UTILITY FUNCTIONS */
-
-    //TODO: Move this
-    bool IsPerfectSquare(int num) {
-        int root = static_cast<int>(sqrt(num));
-        return root*root==num;
-    }
-    
-
     ~Autotuner(){}
 
 private:
     PlatformParams platformParams;
-    JobInfo jobInfo;
-    int rank; int worldSize;
-    int localRank;
 
 };//Autotuner
 
