@@ -33,6 +33,7 @@
 #include "SpParMat.h"
 #include "PlatformParams.h"
 #include "SymbolicSpParMat3D.h"
+#include "Debugger.h"
 
 #define ASSERT(condition, message) \
     do { \
@@ -43,6 +44,7 @@
 
 
 #define ATIMING
+#define DEBUG
 
 namespace combblas {
 
@@ -146,9 +148,9 @@ public:
     AutotunerSpGEMM3D(JobManager jobManager):
     platformParams(PlatformParams()), jobInfo(JobInfo(jobManager)) 
     {
-        
         SetMPIInfo();
-
+        Debugger _debugger(rank);
+        debugger = _debugger;
     }
     
     // Assumes PlatformParams has already been constructed
@@ -156,6 +158,8 @@ public:
     platformParams(params), jobInfo(JobInfo(jobManager))
     {
         SetMPIInfo(); 
+        Debugger _debugger(rank);
+        debugger = _debugger;
     }
     
     
@@ -197,9 +201,7 @@ public:
     template <typename AIT, typename ANT, typename ADER, typename BIT, typename BNT, typename BDER>
     std::shared_ptr<CommGrid3D> TuneGPU() {/*TODO*/}
 
-    
-    /* SEARCH SPACE EXPLORATION */
-    
+
     /* Given a set of parameters, construct a 3D processor grid from a communicator that only contains the processes
      * with local ranks < ppn on nodes < n
      */
@@ -216,10 +218,12 @@ public:
 
         if (color==1) {
 
-            ASSERT(newSize==params.nodes*params.ppn, "Expected communicator size to be " + std::to_string(params.nodes*params.ppn) +
-            ", but it was " + std::to_string(newSize));
-            ASSERT(IsPerfectSquare(newSize / params.layers), "Each 2D grid must be a perfect square, instead got " + params.outStr());
-            
+            ASSERT(newSize==params.nodes*params.ppn, 
+            "Expected communicator size to be " + std::to_string(params.nodes*params.ppn) + ", but it was " 
+            + std::to_string(newSize));
+
+            ASSERT(IsPerfectSquare(newSize / params.layers), 
+            "Each 2D grid must be a perfect square, instead got " + params.outStr());
             
             std::shared_ptr<CommGrid3D> newGrid;
             newGrid.reset(new CommGrid3D(newComm, params.layers, 0, 0));
@@ -231,6 +235,10 @@ public:
         }
 
     }
+    
+
+    /* SEARCH SPACE EXPLORATION */
+    
 
 
     /* Return all powers of 2 node counts up to the number of nodes allocated to the job */
@@ -357,6 +365,18 @@ public:
     int GetLocalRank() const {return localRank;}
     int GetWorldSize() const {return worldSize;}
     
+    void Print(std::string msg) {
+#ifdef DEBUG
+    debugger.Print(msg);
+#endif
+    }
+    
+    void Log(std::string msg) {
+#ifdef DEBUG
+    debugger.Log(msg);
+#endif
+    }
+    
     /* UTILITY FUNCTIONS */
 
     bool IsPerfectSquare(int num) {
@@ -372,6 +392,7 @@ private:
     JobInfo jobInfo;
     int rank; int worldSize;
     int localRank;
+    Debugger debugger;
 
 };//AutotunerSpGEMM3D
 
