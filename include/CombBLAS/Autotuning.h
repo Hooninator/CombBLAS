@@ -135,6 +135,45 @@ void Init(JobManager jm) {
 
 
 
+/* Generic model for communication time */
+class CommModel {
+
+public:
+    CommModel(){}
+    
+    virtual double ComputeTime() {throw std::runtime_error("This method should never be called");}
+    
+    virtual MPI_Comm GetWorld() {throw std::runtime_error("This method should never be called");}
+
+};
+
+/* T = alpha + bytes/beta */
+class PostCommModel : public CommModel {
+
+public:
+    
+    PostCommModel(double alpha, double beta, std::function<int()> ComputeNumMsgs, std::function<int()> ComputeNumBytes,
+                    MPI_Comm world):
+    alpha(alpha), beta(beta), ComputeNumMsgs(ComputeNumMsgs), ComputeNumBytes(ComputeNumBytes), world(world)
+    {
+        
+    }
+    
+    inline double ComputeTime() {
+        return ComputeNumMsgs() * alpha + (ComputeNumBytes())/beta;
+    }
+
+    inline MPI_Comm GetWorld() {return world;}
+
+private:
+    double alpha; double beta;
+    std::function<int()> ComputeNumMsgs; std::function<int()> ComputeNumBytes;
+
+    MPI_Comm world;
+
+};
+
+
 
 template <typename AIT, typename ANT, typename ADER, typename BIT, typename BNT, typename BDER>
 class SpGEMM3DInput {
@@ -186,17 +225,27 @@ public:
     /* Get runtime estimate of a certain combo of parameters */    
     template <typename AIT, typename ANT, typename ADER, typename BIT, typename BNT, typename BDER>
     double EstimateRuntime(SpGEMM3DInput<AIT,ANT,ADER,BIT,BNT,BDER> input, PlatformParams platformParams) {
-        /* TODO */
+        /* TODO: Make new commgrid for A,B based on params */
         auto A = input.A;
         auto B = input.B;
         
-        double totalTime = BcastTime(A, platformParams, BCAST_ROW, BCAST_TREE) +
-                           BcastTime(B, platformParams, BCAST_COL, BCAST_TREE);
+        auto grid = A.getcommgrid();
+        
+        CommModel *bcastModelA = MakeBcastModelPost(A, platformParams, BCAST_TREE,  
+                                    grid->GetCommGridLayer()->GetRowWorld());
+        CommModel *bcastModelB = MakeBcastModelPost(B, platformParams, BCAST_TREE, 
+                                    grid->GetCommGridLayer()->GetColWorld());
+        
+        double bcastTime = BcastTime(bcastModelA, grid) + BcastTime(bcastModelB, grid); 
+        
+
+        delete bcastModelA; delete bcastModelB;
+        
         return 0;
     }
 
 
-    /* Time estimates for each step of 3D SpGEMM */    
+    /* BROADCAST MODELS */    
     
     enum BcastAlgorithm {
         BCAST_TREE,
@@ -207,61 +256,68 @@ public:
         BCAST_ROW,
         BCAST_COL
     } typedef BcastWorld;
-
-    //TODO: Fancy this
+    
+    
     template <typename IT, typename NT, typename DER>
-    double BcastTime(SpParMat3D<IT, NT, DER>& M, PlatformParams &params, BcastWorld bcastWorld, BcastAlgorithm alg) {
+    PostCommModel * MakeBcastModelPost(SpParMat3D<IT,NT,DER>& M, PlatformParams &params, BcastAlgorithm alg, MPI_Comm bcastWorld) {
+        
+        std::function<int()> _ComputeNumMsgs;
+        std::function<int()> _ComputeNumBytes;
+
+        auto layerMat = M.GetLayerMat();
+
+        switch(alg) {
+
+            case BCAST_TREE:
+            {
+                _ComputeNumMsgs = [bcastWorld]() {
+                    int bcastWorldSize; 
+                    MPI_Comm_size(bcastWorld, &bcastWorldSize);
+                    return static_cast<int>(log2(bcastWorldSize));
+                }; 
+                
+                _ComputeNumBytes = [&layerMat]() {
+                    // Size of message this processor sends in bcasts        
+                    int sendBytes = layerMat->seqptr()->getnnz() * sizeof(NT) + //nnz size
+                                      layerMat->seqptr()->getncol() * sizeof(IT) + //colptr size
+                                      (layerMat->seqptr()->getnrow() + 1 ) * sizeof(IT); //rowindices size
+                    return sendBytes;
+                };
+                
+                break;
+            }
+
+        }
+        
+        return new PostCommModel(params.GetInternodeAlpha(), params.GetInternodeBeta(), 
+                                    _ComputeNumMsgs, _ComputeNumBytes,
+                                    bcastWorld);
+
+    }
+
+
+    double BcastTime(CommModel * bcastModel, std::shared_ptr<CommGrid3D> grid) {
 #ifdef ATIMING
         auto stime1 = MPI_Wtime();
 #endif
-        
-        auto grid = M.getcommgrid3D();
-        auto layerMat = M.GetLayerMat();
-        
-        int bcastWorldSize; 
-        if (bcastWorld==BCAST_ROW)
-            bcastWorldSize = grid->GetGridRows();
-        else if (bcastWorld==BCAST_COL)
-            bcastWorldSize = grid->GetGridCols();
 
-        //Assume tree bcast for now
+        double localBcastTime = bcastModel->ComputeTime();
 
-        //log2(gridrows) total messages
-        double latencyTimeBcast = bcastWorldSize * (params.GetInternodeAlpha() * log2(bcastWorldSize)); 
+        double * totalTime = new double(0.0);
+        MPI_Allreduce(&localBcastTime, totalTime, 1, MPI_DOUBLE, MPI_SUM, bcastModel->GetWorld()); 
         
-        // Size of message this processor sends in bcasts        
-        int sendBytes = layerMat->seqptr()->getnnz() * sizeof(NT) + //nnz size
-                          layerMat->seqptr()->getncol() * sizeof(IT) + //colptr size
-                          (layerMat->seqptr()->getnrow() + 1 ) * sizeof(IT); //rowindices size
-        
-        int totalBytes;
-        
-        // Sum of all bytes sent/recvd
-        if (bcastWorld==BCAST_ROW)
-            MPI_Allreduce(&sendBytes, &totalBytes, 1, MPI_INT, MPI_SUM, grid->GetCommGridLayer()->GetRowWorld());
-        else if (bcastWorld==BCAST_COL)
-            MPI_Allreduce(&sendBytes, &totalBytes, 1, MPI_INT, MPI_SUM, grid->GetCommGridLayer()->GetColWorld());
-        
-        // Time for all bcasts
-        double bandwidthTimeBcast = bcastWorldSize * ( (totalBytes / params.GetInternodeBeta()) * log2(bcastWorldSize) );
-        
-        double totalTime = latencyTimeBcast + bandwidthTimeBcast;
-        
-        double finalTime;
-        
-        // Allreduce to get max time
-        MPI_Allreduce(&totalTime, &finalTime, 1, MPI_DOUBLE, MPI_MAX, grid->GetWorld());
-    
+        double * finalTime = new double(0.0);
+        MPI_Allreduce(totalTime, finalTime, 1, MPI_DOUBLE, MPI_MAX, grid->GetLayerWorld());
+
 #ifdef ATIMING
         auto etime1 = MPI_Wtime();
         auto t1 = (etime1-stime1);
-        debugPtr->Print("[Abcast calc time] " + std::to_string(t1) + "s");
-        debugPtr->Print("[Abcast time] " + std::to_string(finalTime) + "us");
+        debugPtr->Print("[Bcast calc time] " + std::to_string(t1) + "s");
+        debugPtr->Print("[Bcast time] " + std::to_string(*finalTime) + "us");
 #endif
-        return finalTime;
+
+        return *finalTime;
     }
-    
-    
 
 
 

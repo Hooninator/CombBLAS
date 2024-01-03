@@ -24,14 +24,9 @@ int main(int argc, char ** argv) {
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &n);
 
-    float dummyBeta = 1.0;
-    float dummyAlpha = 0.1;
-    int cores = 128;
-    int devs = 4;
     
     autotuning::Init(autotuning::M_SLURM);
-    autotuning::PlatformParams params(dummyAlpha, dummyBeta, cores, devs);
-    autotuning::Autotuner tuner(params);
+    autotuning::Autotuner tuner(autotuning::perlmutterParams);
     
     std::string matname(argv[1]);
     
