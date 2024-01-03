@@ -19,7 +19,9 @@ public:
         internodeAlpha = MeasureInternodeAlpha();
         internodeBeta = MeasureInternodeBeta();
     }
-
+    
+    //alpha is us
+    //beta is bytes/us
     PlatformParams(float internodeAlpha, float internodeBeta, int coresPerNode, int devsPerNode) : 
     internodeAlpha(internodeAlpha), internodeBeta(internodeBeta), coresPerNode(coresPerNode), devsPerNode(devsPerNode)
     {}
@@ -42,6 +44,9 @@ private:
     int devsPerNode;
     
 };
+
+//Values obtained with osu microbenchmarks
+PlatformParams perlmutterParams(3.9, 2406.87, 128, 4);
 
 } //autotuning
 }//combblas
