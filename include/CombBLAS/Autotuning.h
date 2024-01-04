@@ -8,6 +8,7 @@
 #include <cassert>
 #include <cstdlib>
 #include <sstream>
+#include <limits>
 
 #include "SpMat.h"
 #include "SpTuples.h"
@@ -193,12 +194,12 @@ public:
     nodes(nodes), ppn(ppn), layers(layers) {}
 
     
-    void print() {
+    void Print() {
         std::cout<< "(Nodes: "<<nodes<<", PPN: "<<ppn<<", Layers: "<<layers<<")"<<std::endl;
     }
 
     
-    std::string outStr() {
+    std::string OutStr() {
         std::stringstream ss;
         ss<< "(Nodes: "<<nodes<<", PPN: "<<ppn<<", Layers: "<<layers<<")"<<std::endl;
         return ss.str();
@@ -226,20 +227,60 @@ public:
     template <typename AIT, typename ANT, typename ADER, typename BIT, typename BNT, typename BDER>
     double EstimateRuntime(SpGEMM3DInput<AIT,ANT,ADER,BIT,BNT,BDER> input, PlatformParams platformParams) {
         /* TODO: Make new commgrid for A,B based on params */
-        auto A = input.A;
-        auto B = input.B;
-        
-        auto grid = A.getcommgrid();
-        
-        CommModel *bcastModelA = MakeBcastModelPost(A, platformParams, BCAST_TREE,  
-                                    grid->GetCommGridLayer()->GetRowWorld());
-        CommModel *bcastModelB = MakeBcastModelPost(B, platformParams, BCAST_TREE, 
-                                    grid->GetCommGridLayer()->GetColWorld());
-        
-        double bcastTime = BcastTime(bcastModelA, grid) + BcastTime(bcastModelB, grid); 
-        
 
-        delete bcastModelA; delete bcastModelB;
+#ifdef DEBUG
+        debugPtr->Log(OutStr());
+#endif
+        
+        auto paramGrid = MakeGridFromParams();
+        
+        if (paramGrid==nullptr) {
+            debugPtr->Log("Not participating in this one");
+            return -1.0;
+        }
+
+#ifdef DEBUG
+        debugPtr->Log("Made grid");
+#endif
+
+        //SpParMat3D<AIT,ANT,ADER> A(input.A.seqptr(), paramGrid, input.A.isColSplit());
+
+#ifdef DEBUG
+        debugPtr->Log("Made A");
+#endif
+
+        //SpParMat3D<BIT,BNT,BDER> B(input.B.seqptr(), paramGrid, input.B.isColSplit());
+
+#ifdef DEBUG
+        debugPtr->Log("Made B");
+#endif
+
+        
+        auto grid = paramGrid; 
+        
+        //CommModel *bcastModelA = MakeBcastModelPost(A, platformParams, BCAST_TREE,  
+         //                           grid->GetCommGridLayer()->GetRowWorld());
+        //CommModel *bcastModelB = MakeBcastModelPost(B, platformParams, BCAST_TREE, 
+           //                         grid->GetCommGridLayer()->GetColWorld());
+        
+#ifdef DEBUG
+        debugPtr->Log("Made models");
+        debugPtr->Log(grid);
+#endif
+
+        double bcastTime = 0.0;//BcastTime(bcastModelA, grid) + BcastTime(bcastModelB, grid); 
+        
+#ifdef ATIMING
+        debugPtr->Print("[Bcast time] " + std::to_string(bcastTime) + "s");
+#endif
+
+        //MPI_Barrier(grid->GetWorld());        
+
+        //delete bcastModelA; delete bcastModelB;
+
+#ifdef DEBUG
+        debugPtr->Log("Done with runtime estimation");
+#endif
         
         return 0;
     }
@@ -297,25 +338,28 @@ public:
 
 
     double BcastTime(CommModel * bcastModel, std::shared_ptr<CommGrid3D> grid) {
+
 #ifdef ATIMING
         auto stime1 = MPI_Wtime();
 #endif
 
         double localBcastTime = bcastModel->ComputeTime();
 
+#ifdef DEBUG
+        debugPtr->Log("Computed local Bcast time");
+#endif
+
         double * totalTime = new double(0.0);
         MPI_Allreduce(&localBcastTime, totalTime, 1, MPI_DOUBLE, MPI_SUM, bcastModel->GetWorld()); 
         
         double * finalTime = new double(0.0);
-        MPI_Allreduce(totalTime, finalTime, 1, MPI_DOUBLE, MPI_MAX, grid->GetLayerWorld());
+        MPI_Allreduce(totalTime, finalTime, 1, MPI_DOUBLE, MPI_MAX, grid->GetWorld());
 
 #ifdef ATIMING
         auto etime1 = MPI_Wtime();
         auto t1 = (etime1-stime1);
         debugPtr->Print("[Bcast calc time] " + std::to_string(t1) + "s");
-        debugPtr->Print("[Bcast time] " + std::to_string(*finalTime) + "us");
 #endif
-
         return *finalTime;
     }
 
@@ -348,10 +392,14 @@ public:
             + std::to_string(newSize));
 
             ASSERT(IsPerfectSquare(newSize / layers), 
-            "Each 2D grid must be a perfect square, instead got " + outStr());
+            "Each 2D grid must be a perfect square, instead got " + OutStr());
             
             std::shared_ptr<CommGrid3D> newGrid;
             newGrid.reset(new CommGrid3D(newComm, layers, 0, 0));
+
+#ifdef DEBUG
+            debugPtr->Log("Grid size "+std::to_string(newSize));
+#endif
             
             return newGrid;
 
@@ -413,6 +461,7 @@ public:
     
 
     /* Main tuning routine for CPU 3DSpGEMM */
+    //TODO: Make the tuning method parameter a std::function instance
     template <typename AIT, typename ANT, typename ADER, typename BIT, typename BNT, typename BDER>
     SpGEMM3DParams TuneSpGEMM3D(SpParMat<AIT, ANT, ADER>& A, SpParMat<BIT, BNT, BDER>& B, TuningMethod method){
         
@@ -447,19 +496,38 @@ public:
     
     template <typename P, typename I>
     P SearchBruteForce(I input) {
+
+#ifdef ATIMING
+        auto stime1 = MPI_Wtime();
+#endif
+
         auto searchSpace = P::ConstructSearchSpace();
         ASSERT(searchSpace.size()>0, "Search space is of size 0!");
 
-        P bestParams = searchSpace[0]; 
-        double bestTime = bestParams.EstimateRuntime(input, platformParams); 
+        P bestParams;  
+        double bestTime = std::numeric_limits<double>::max(); 
 
-        for (P& currParams : searchSpace) {
+        for (P currParams : searchSpace) {
             double currTime = currParams.EstimateRuntime(input, platformParams);
-            if (currTime<bestTime) {
+#ifdef DEBUG
+            debugPtr->Log("Finished estimation");
+#endif
+            if (currTime<=bestTime) {
                 bestTime = currTime;
                 bestParams = currParams;
             }
+
+#ifdef DEBUG
+            debugPtr->Log("Finished iteration");
+#endif
+
         }
+
+#ifdef ATIMING
+        auto etime1 = MPI_Wtime();
+        auto t1 = (etime1-stime1);
+        debugPtr->Print("[SearchBruteForce] " + std::to_string(t1) + "s");
+#endif
         
         return bestParams;
     }

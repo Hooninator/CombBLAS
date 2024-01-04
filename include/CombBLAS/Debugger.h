@@ -17,13 +17,15 @@ public:
     }
 
     
-    void Print(std::string msg) {
-        if (rank==0) std::cout<<msg<<std::endl;
+    void Print(std::string msg, bool allRanks=false) {
+        if (rank==0 || allRanks) std::cout<<msg<<std::endl;
     }
     
+    
+    template <typename T>
+    void Log(T msg) {ofs<<msg<<std::endl;}
 
-    void Log(std::string msg) {ofs<<msg<<std::endl;}
-
+    ~Debugger(){ofs.close();}
 
 private:
     int rank;
