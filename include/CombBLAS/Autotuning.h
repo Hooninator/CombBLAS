@@ -144,18 +144,18 @@ public:
     
     virtual double ComputeTime() {throw std::runtime_error("This method should never be called");}
     
-    virtual MPI_Comm GetWorld() {throw std::runtime_error("This method should never be called");}
+    virtual int GetWorld() {throw std::runtime_error("This method should never be called");}
 
 };
 
 /* T = alpha + bytes/beta */
+template <typename IT>
 class PostCommModel : public CommModel {
 
 public:
     
-    PostCommModel(double alpha, double beta, std::function<int()> ComputeNumMsgs, std::function<int()> ComputeNumBytes,
-                    MPI_Comm world):
-    alpha(alpha), beta(beta), ComputeNumMsgs(ComputeNumMsgs), ComputeNumBytes(ComputeNumBytes), world(world)
+    PostCommModel(double alpha, double beta, std::function<int()> ComputeNumMsgs, std::function<IT()> ComputeNumBytes):
+    alpha(alpha), beta(beta), ComputeNumMsgs(ComputeNumMsgs), ComputeNumBytes(ComputeNumBytes)
     {
         
     }
@@ -164,24 +164,67 @@ public:
         return ComputeNumMsgs() * alpha + (ComputeNumBytes())/beta;
     }
 
-    inline MPI_Comm GetWorld() {return world;}
-
 private:
     double alpha; double beta;
-    std::function<int()> ComputeNumMsgs; std::function<int()> ComputeNumBytes;
-
-    MPI_Comm world;
+    std::function<int()> ComputeNumMsgs; std::function<IT()> ComputeNumBytes;
 
 };
 
+
+
+template <typename IT, typename NT, typename DER>
+class SpGEMM3DMatrixInfo {
+
+public:
+
+    typedef IT indexType;
+    typedef NT nzType;
+    typedef DER seqType;
+    
+    SpGEMM3DMatrixInfo(SpParMat3D<IT,NT,DER>& M):
+    nnz(M.getnnz()), ncols(M.getncol()), nrows(M.getnrow()) {
+        density = static_cast<float>(nnz) / static_cast<float>(ncols*nrows);
+    }
+    
+    SpGEMM3DMatrixInfo(IT nnz, IT cols, IT rows):
+    nnz(nnz), ncols(cols), nrows(rows) {
+        density = static_cast<float>(nnz) / static_cast<float>(ncols*nrows);
+    }
+    
+    inline int GetIndexSize() const {return sizeof(IT);}
+    inline int GetNzvalSize() const {return sizeof(NT);}
+    
+    inline IT GetNnz() const {return nnz;}
+    inline IT GetNcols() const {return ncols;}
+    inline IT GetNrows() const {return nrows;}
+    
+    inline float GetDensity() const {return density;}
+    
+private:
+
+    
+    IT nnz;
+    IT ncols;
+    IT nrows;
+    
+    float density;
+        
+};
 
 
 template <typename AIT, typename ANT, typename ADER, typename BIT, typename BNT, typename BDER>
-class SpGEMM3DInput {
+class SpGEMM3DInputs {
+
 public:
-    SpParMat3D<AIT, ANT, ADER>& A;
-    SpParMat3D<BIT, BNT, BDER>& B;
-};
+
+    SpGEMM3DInputs<AIT,ANT,ADER,BIT,BNT,BDER>(SpGEMM3DMatrixInfo<AIT,ANT,ADER>& Ainfo, 
+                                                SpGEMM3DMatrixInfo<BIT,BNT,BDER>& Binfo):
+    Ainfo(Ainfo), Binfo(Binfo) {}
+
+    SpGEMM3DMatrixInfo<AIT,ANT,ADER>& Ainfo;
+    SpGEMM3DMatrixInfo<BIT,BNT,BDER>& Binfo;
+}; 
+
 
 /* Output of tune routine. Relevant SpGEMM3D params that should be used to create a CommGrid3D */
 class SpGEMM3DParams {
@@ -201,7 +244,7 @@ public:
     
     std::string OutStr() {
         std::stringstream ss;
-        ss<< "(Nodes: "<<nodes<<", PPN: "<<ppn<<", Layers: "<<layers<<")"<<std::endl;
+        ss<< "(Nodes: "<<nodes<<", PPN: "<<ppn<<", Layers: "<<layers<<")";
         return ss.str();
     }
 
@@ -225,63 +268,26 @@ public:
 
     /* Get runtime estimate of a certain combo of parameters */    
     template <typename AIT, typename ANT, typename ADER, typename BIT, typename BNT, typename BDER>
-    double EstimateRuntime(SpGEMM3DInput<AIT,ANT,ADER,BIT,BNT,BDER> input, PlatformParams platformParams) {
-        /* TODO: Make new commgrid for A,B based on params */
+    double EstimateRuntime(SpGEMM3DInputs<AIT,ANT,ADER, BIT, BNT, BDER> inputs, PlatformParams& platformParams) {
 
 #ifdef DEBUG
         debugPtr->Log(OutStr());
 #endif
         
-        auto paramGrid = MakeGridFromParams();
+        auto Ainfo = inputs.Ainfo;
+        auto Binfo = inputs.Binfo; 
         
-        if (paramGrid==nullptr) {
-            debugPtr->Log("Not participating in this one");
-            return -1.0;
-        }
-
-#ifdef DEBUG
-        debugPtr->Log("Made grid");
-#endif
-
-        //SpParMat3D<AIT,ANT,ADER> A(input.A.seqptr(), paramGrid, input.A.isColSplit());
-
-#ifdef DEBUG
-        debugPtr->Log("Made A");
-#endif
-
-        //SpParMat3D<BIT,BNT,BDER> B(input.B.seqptr(), paramGrid, input.B.isColSplit());
-
-#ifdef DEBUG
-        debugPtr->Log("Made B");
-#endif
-
+        CommModel *bcastModelA = MakeBcastModelPost(Ainfo, platformParams, BCAST_TREE);
+        CommModel *bcastModelB = MakeBcastModelPost(Binfo, platformParams, BCAST_TREE);
         
-        auto grid = paramGrid; 
-        
-        //CommModel *bcastModelA = MakeBcastModelPost(A, platformParams, BCAST_TREE,  
-         //                           grid->GetCommGridLayer()->GetRowWorld());
-        //CommModel *bcastModelB = MakeBcastModelPost(B, platformParams, BCAST_TREE, 
-           //                         grid->GetCommGridLayer()->GetColWorld());
-        
-#ifdef DEBUG
-        debugPtr->Log("Made models");
-        debugPtr->Log(grid);
-#endif
-
-        double bcastTime = 0.0;//BcastTime(bcastModelA, grid) + BcastTime(bcastModelB, grid); 
+        double bcastTime = BcastTime(bcastModelA) + BcastTime(bcastModelB); 
         
 #ifdef ATIMING
-        debugPtr->Print("[Bcast time] " + std::to_string(bcastTime) + "s");
+        debugPtr->Print("[Bcast time] " + std::to_string(bcastTime/1e6) + "s");
+        debugPtr->Log("[Bcast time] " + std::to_string(bcastTime/1e6) + "s");
 #endif
+        delete bcastModelA; delete bcastModelB;
 
-        //MPI_Barrier(grid->GetWorld());        
-
-        //delete bcastModelA; delete bcastModelB;
-
-#ifdef DEBUG
-        debugPtr->Log("Done with runtime estimation");
-#endif
-        
         return 0;
     }
 
@@ -300,29 +306,42 @@ public:
     
     
     template <typename IT, typename NT, typename DER>
-    PostCommModel * MakeBcastModelPost(SpParMat3D<IT,NT,DER>& M, PlatformParams &params, BcastAlgorithm alg, MPI_Comm bcastWorld) {
+    PostCommModel<IT> * MakeBcastModelPost(SpGEMM3DMatrixInfo<IT,NT,DER>& Minfo, PlatformParams &params, BcastAlgorithm alg) {
         
         std::function<int()> _ComputeNumMsgs;
-        std::function<int()> _ComputeNumBytes;
-
-        auto layerMat = M.GetLayerMat();
+        std::function<IT()> _ComputeNumBytes;
 
         switch(alg) {
 
             case BCAST_TREE:
             {
-                _ComputeNumMsgs = [bcastWorld]() {
-                    int bcastWorldSize; 
-                    MPI_Comm_size(bcastWorld, &bcastWorldSize);
+                _ComputeNumMsgs = [this]() {
+                    int bcastWorldSize = static_cast<int>(sqrt( (this->nodes*this->ppn) / this->layers ));
                     return static_cast<int>(log2(bcastWorldSize));
                 }; 
                 
-                _ComputeNumBytes = [&layerMat]() {
-                    // Size of message this processor sends in bcasts        
-                    int sendBytes = layerMat->seqptr()->getnnz() * sizeof(NT) + //nnz size
-                                      layerMat->seqptr()->getncol() * sizeof(IT) + //colptr size
-                                      (layerMat->seqptr()->getnrow() + 1 ) * sizeof(IT); //rowindices size
-                    return sendBytes;
+                _ComputeNumBytes = [Minfo, this]() {
+                    int totalProcs = this->nodes * this->ppn;
+
+                    //TODO: Make these things methods in the SpGEMM3DMatrixInfo class
+                    IT localNcols = Minfo.GetNcols() / static_cast<int>(sqrt(totalProcs));
+                    IT localNrows = Minfo.GetNrows() / static_cast<int>(sqrt(totalProcs));
+                    IT localMatSize = localNcols * localNrows;
+
+                    IT localNnzApprox = static_cast<int>(Minfo.GetDensity() * localMatSize); 
+                    IT sendBytes = localNnzApprox * Minfo.GetNzvalSize() +
+                                    localNnzApprox * Minfo.GetIndexSize() +
+                                    (localNnzApprox + 1) * Minfo.GetIndexSize();
+
+                    int bcastWorldSize = static_cast<int>(sqrt(this->nodes*this->ppn / this->layers));
+                    IT totalBytes = sendBytes*static_cast<int>(log2(bcastWorldSize));
+#ifdef DEBUG
+                    debugPtr->Log("bcastWorldSize: " + std::to_string(bcastWorldSize));
+                    debugPtr->Log("Local mat size: " + std::to_string(localMatSize));
+                    debugPtr->Log("Local nnz estimate: " + std::to_string(localNnzApprox));
+                    debugPtr->Log("Send bytes estimate: " + std::to_string(totalBytes));
+#endif                    
+                    return totalBytes;
                 };
                 
                 break;
@@ -330,37 +349,29 @@ public:
 
         }
         
-        return new PostCommModel(params.GetInternodeAlpha(), params.GetInternodeBeta(), 
-                                    _ComputeNumMsgs, _ComputeNumBytes,
-                                    bcastWorld);
+        return new PostCommModel<IT>(params.GetInternodeAlpha(), params.GetInternodeBeta(), 
+                                    _ComputeNumMsgs, _ComputeNumBytes);
 
     }
 
 
-    double BcastTime(CommModel * bcastModel, std::shared_ptr<CommGrid3D> grid) {
+    double BcastTime(CommModel * bcastModel) {
 
 #ifdef ATIMING
         auto stime1 = MPI_Wtime();
 #endif
 
-        double localBcastTime = bcastModel->ComputeTime();
+        double singleBcastTime = bcastModel->ComputeTime();
 
-#ifdef DEBUG
-        debugPtr->Log("Computed local Bcast time");
-#endif
-
-        double * totalTime = new double(0.0);
-        MPI_Allreduce(&localBcastTime, totalTime, 1, MPI_DOUBLE, MPI_SUM, bcastModel->GetWorld()); 
-        
-        double * finalTime = new double(0.0);
-        MPI_Allreduce(totalTime, finalTime, 1, MPI_DOUBLE, MPI_MAX, grid->GetWorld());
+        int gridSize = (nodes*ppn) / layers; 
+        double finalTime = singleBcastTime * sqrt(gridSize); 
 
 #ifdef ATIMING
         auto etime1 = MPI_Wtime();
         auto t1 = (etime1-stime1);
         debugPtr->Print("[Bcast calc time] " + std::to_string(t1) + "s");
 #endif
-        return *finalTime;
+        return finalTime;
     }
 
 
@@ -375,6 +386,7 @@ public:
      * with local ranks < ppn on nodes < n
      */
     std::shared_ptr<CommGrid3D> MakeGridFromParams() {
+        //TODO: This needs some major work
         int nodeRank = (autotuning::rank / jobPtr->tasksPerNode);
         int color = static_cast<int>(nodeRank < nodes && autotuning::localRank < ppn);
         int key = autotuning::rank;
@@ -467,8 +479,11 @@ public:
         
         SpParMat3D<AIT, ANT, ADER> A3D(A, 1, true, false);
         SpParMat3D<BIT, BNT, BDER> B3D(B, 1, false, false);
+    
+        SpGEMM3DMatrixInfo<AIT,ANT,ADER> Ainfo(A3D);
+        SpGEMM3DMatrixInfo<BIT,BNT,BDER> Binfo(B3D);
         
-        SpGEMM3DInput<AIT,ANT,ADER,BIT,BNT,BDER> inputs{A3D,B3D};
+        SpGEMM3DInputs<AIT,ANT,ADER,BIT,BNT,BDER> inputs(Ainfo, Binfo);
         
         SpGEMM3DParams resultParams; 
         
