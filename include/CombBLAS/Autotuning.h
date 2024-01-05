@@ -44,8 +44,8 @@
     } while (false)
 
 
-#define PROFILE
-#define DEBUG
+//#define PROFILE
+//#define DEBUG
 
 namespace combblas {
 
@@ -131,9 +131,14 @@ void Init(JobManager jm) {
     
     jobPtr = new JobInfo(jm);
 
+#ifdef DEBUG
     debugPtr = new Logger(rank,"logfile"+std::to_string(rank)+".out");
+#endif
+
+#ifdef PROFILE
     statPtr = new Logger(rank, "statfile-N"+std::to_string(jobPtr->nodes)+".out");
-    
+#endif    
+
     initCalled = true;
 }
 
@@ -518,6 +523,10 @@ public:
 
         auto searchSpace = P::ConstructSearchSpace();
         ASSERT(searchSpace.size()>0, "Search space is of size 0!");
+
+#ifdef PROFILE
+        statPtr->Log("Search space size: " + std::to_string(searchSpace.size()));
+#endif
 
         P bestParams;  
         double bestTime = std::numeric_limits<double>::max(); 
