@@ -7,7 +7,7 @@
 #include "CombBLAS/CommGrid3D.h"
 #include "CombBLAS/SpParMat3D.h"
 #include "CombBLAS/ParFriends.h"
-#include "CombBLAS/Autotuning.h"
+#include "CombBLAS/Autotuning/Autotuner.h"
 
 #define ATIMING
 

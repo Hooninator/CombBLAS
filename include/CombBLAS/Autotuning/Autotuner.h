@@ -10,28 +10,28 @@
 #include <sstream>
 #include <limits>
 
-#include "SpMat.h"
-#include "SpTuples.h"
-#include "SpDCCols.h"
-#include "CommGrid.h"
-#include "CommGrid3D.h"
+#include "CombBLAS/SpMat.h"
+#include "CombBLAS/SpTuples.h"
+#include "CombBLAS/SpDCCols.h"
+#include "CombBLAS/CommGrid.h"
+#include "CombBLAS/CommGrid3D.h"
 
-#include "MPIType.h"
-#include "LocArr.h"
-#include "SpDefs.h"
-#include "Deleter.h"
-#include "SpHelper.h"
-#include "SpParHelper.h"
-#include "FullyDistVec.h"
-#include "Friends.h"
-#include "Operations.h"
-#include "DistEdgeList.h"
-#include "mtSpGEMM.h"
-#include "MultiwayMerge.h"
-#include "CombBLAS.h"
+#include "CombBLAS/MPIType.h"
+#include "CombBLAS/LocArr.h"
+#include "CombBLAS/SpDefs.h"
+#include "CombBLAS/Deleter.h"
+#include "CombBLAS/SpHelper.h"
+#include "CombBLAS/SpParHelper.h"
+#include "CombBLAS/FullyDistVec.h"
+#include "CombBLAS/Friends.h"
+#include "CombBLAS/Operations.h"
+#include "CombBLAS/DistEdgeList.h"
+#include "CombBLAS/mtSpGEMM.h"
+#include "CombBLAS/MultiwayMerge.h"
+#include "CombBLAS/CombBLAS.h"
+#include "CombBLAS/SpParMat3D.h"
+#include "CombBLAS/SpParMat.h"
 
-#include "SpParMat3D.h"
-#include "SpParMat.h"
 #include "PlatformParams.h"
 #include "SymbolicSpParMat3D.h"
 #include "Logger.h"
@@ -44,8 +44,8 @@
     } while (false)
 
 
-//#define PROFILE
-//#define DEBUG
+#define PROFILE
+#define DEBUG
 
 namespace combblas {
 
@@ -198,6 +198,18 @@ public:
     nnz(nnz), ncols(cols), nrows(rows) {
         density = static_cast<float>(nnz) / static_cast<float>(ncols*nrows);
     }
+
+    /* Simple density based nnz estimator */
+    IT ApproxLocalNnzDensity(SpGEMM3DParams * params) {
+        int totalProcs = params->nodes * params->ppn;
+
+        IT localNcols = Minfo.GetNcols() / static_cast<IT>(sqrt(totalProcs));
+        IT localNrows = Minfo.GetNrows() / static_cast<IT>(sqrt(totalProcs));
+        IT localMatSize = localNcols * localNrows;
+
+        IT localNnzApprox = static_cast<IT>(Minfo.GetDensity() * localMatSize); 
+        return localNnzApprox;
+    }
     
     inline int GetIndexSize() const {return sizeof(IT);}
     inline int GetNzvalSize() const {return sizeof(NT);}
@@ -288,11 +300,14 @@ public:
         CommModel *bcastModelA = MakeBcastModelPost(Ainfo, platformParams, BCAST_TREE);
         CommModel *bcastModelB = MakeBcastModelPost(Binfo, platformParams, BCAST_TREE);
         
-        double bcastTime = BcastTime(bcastModelA) + BcastTime(bcastModelB); 
+        double bcastATime = BcastTime(bcastModelA);
+        double bcastBTime = BcastTime(bcastModelB);  
         
 #ifdef PROFILE
-        statPtr->Print("[Bcast time] " + std::to_string(bcastTime/1e6) + "s");
-        statPtr->Log("Bcast time " + std::to_string(bcastTime/1e6) + "s");
+        statPtr->Print("[BcastA time] " + std::to_string(bcastATime/1e6) + "s");
+        statPtr->Print("[BcastB time] " + std::to_string(bcastBTime/1e6) + "s");
+        statPtr->Log("BcastA time " + std::to_string(bcastATime/1e6) + "s");
+        statPtr->Log("BcastB time " + std::to_string(bcastBTime/1e6) + "s");
 #endif
         delete bcastModelA; delete bcastModelB;
 
@@ -328,26 +343,19 @@ public:
                     return static_cast<int>(log2(bcastWorldSize));
                 }; 
                 
-                _ComputeNumBytes = [Minfo, this]() {
-                    int totalProcs = this->nodes * this->ppn;
+                _ComputeNumBytes = [&Minfo, this]() {
 
-                    //TODO: Make these things methods in the SpGEMM3DMatrixInfo class
-                    IT localNcols = Minfo.GetNcols() / static_cast<int>(sqrt(totalProcs));
-                    IT localNrows = Minfo.GetNrows() / static_cast<int>(sqrt(totalProcs));
-                    IT localMatSize = localNcols * localNrows;
+                    IT localNnzApprox = Minfo.ApproxLocalNnzDensity(this);
 
-                    IT localNnzApprox = static_cast<int>(Minfo.GetDensity() * localMatSize); 
                     IT sendBytes = localNnzApprox * Minfo.GetNzvalSize() +
                                     localNnzApprox * Minfo.GetIndexSize() +
                                     (localNnzApprox + 1) * Minfo.GetIndexSize();
 
                     int bcastWorldSize = static_cast<int>(sqrt(this->nodes*this->ppn / this->layers));
                     IT totalBytes = sendBytes*static_cast<int>(log2(bcastWorldSize));
-#ifdef DEBUG
-                    debugPtr->Log("bcastWorldSize: " + std::to_string(bcastWorldSize));
-                    debugPtr->Log("Local mat size: " + std::to_string(localMatSize));
-                    debugPtr->Log("Local nnz estimate: " + std::to_string(localNnzApprox));
-                    debugPtr->Log("Send bytes estimate: " + std::to_string(totalBytes));
+#ifdef PROFILE
+                    statPtr->Log("Local nnz estimate: " + std::to_string(localNnzApprox));
+                    statPtr->Log("Send bytes estimate: " + std::to_string(totalBytes));
 #endif                    
                     return totalBytes;
                 };
@@ -425,6 +433,8 @@ public:
         }
 
     }
+    
+    
 
 
     /* UTILITY FUNCTIONS */
