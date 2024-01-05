@@ -286,8 +286,8 @@ public:
         double bcastTime = BcastTime(bcastModelA) + BcastTime(bcastModelB); 
         
 #ifdef PROFILE
-        debugPtr->Print("[Bcast time] " + std::to_string(bcastTime/1e6) + "s");
-        debugPtr->Log("[Bcast time] " + std::to_string(bcastTime/1e6) + "s");
+        statPtr->Print("[Bcast time] " + std::to_string(bcastTime/1e6) + "s");
+        statPtr->Log("Bcast time " + std::to_string(bcastTime/1e6) + "s");
 #endif
         delete bcastModelA; delete bcastModelB;
 
@@ -372,7 +372,8 @@ public:
 #ifdef PROFILE
         auto etime1 = MPI_Wtime();
         auto t1 = (etime1-stime1);
-        debugPtr->Print("[Bcast calc time] " + std::to_string(t1) + "s");
+        statPtr->Print("[Bcast calc time] " + std::to_string(t1) + "s");
+        statPtr->Log("Bcast calc time " + std::to_string(t1) + "s");
 #endif
         return finalTime;
     }
@@ -412,10 +413,6 @@ public:
             std::shared_ptr<CommGrid3D> newGrid;
             newGrid.reset(new CommGrid3D(newComm, layers, 0, 0));
 
-#ifdef DEBUG
-            debugPtr->Log("Grid size "+std::to_string(newSize));
-#endif
-            
             return newGrid;
 
         } else {
@@ -526,20 +523,24 @@ public:
         double bestTime = std::numeric_limits<double>::max(); 
 
         for (P currParams : searchSpace) {
+#ifdef PROFILE
+            statPtr->Log(currParams.OutStr());
+#endif
             double currTime = currParams.EstimateRuntime(input, platformParams);
             if (currTime<=bestTime) {
                 bestTime = currTime;
                 bestParams = currParams;
             }
-#ifdef DEBUG
-            debugPtr->Log("Finished iteration");
+#ifdef PROFILE
+            statPtr->Log("Total runtime " + std::to_string(currTime)+"s");
 #endif
         }
 
 #ifdef PROFILE
         auto etime1 = MPI_Wtime();
         auto t1 = (etime1-stime1);
-        debugPtr->Print("[SearchBruteForce] " + std::to_string(t1) + "s");
+        statPtr->Print("[SearchBruteForce] " + std::to_string(t1) + "s");
+        statPtr->Print("SearchBruteForce time " + std::to_string(t1) + "s");
 #endif
         
         return bestParams;
