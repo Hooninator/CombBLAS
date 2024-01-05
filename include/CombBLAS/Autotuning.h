@@ -34,7 +34,7 @@
 #include "SpParMat.h"
 #include "PlatformParams.h"
 #include "SymbolicSpParMat3D.h"
-#include "Debugger.h"
+#include "Logger.h"
 
 #define ASSERT(condition, message) \
     do { \
@@ -44,7 +44,7 @@
     } while (false)
 
 
-#define ATIMING
+#define PROFILE
 #define DEBUG
 
 namespace combblas {
@@ -112,8 +112,9 @@ int rank; int worldSize;
 int localRank;
 bool initCalled = false;
 
-Debugger *debugPtr = nullptr;
 JobInfo *jobPtr = nullptr;
+Logger *debugPtr = nullptr;
+Logger *statPtr = nullptr;
 
 void Init(JobManager jm) {
     
@@ -128,8 +129,10 @@ void Init(JobManager jm) {
     MPI_Comm_split_type(MPI_COMM_WORLD, MPI_COMM_TYPE_SHARED, rank, MPI_INFO_NULL, &localComm);
     MPI_Comm_rank(localComm, &localRank);
     
-    debugPtr = new Debugger(rank);
     jobPtr = new JobInfo(jm);
+
+    debugPtr = new Logger(rank,"logfile"+std::to_string(rank)+".out");
+    statPtr = new Logger(rank, "statfile-N"+std::to_string(jobPtr->nodes)+".out");
     
     initCalled = true;
 }
@@ -282,7 +285,7 @@ public:
         
         double bcastTime = BcastTime(bcastModelA) + BcastTime(bcastModelB); 
         
-#ifdef ATIMING
+#ifdef PROFILE
         debugPtr->Print("[Bcast time] " + std::to_string(bcastTime/1e6) + "s");
         debugPtr->Log("[Bcast time] " + std::to_string(bcastTime/1e6) + "s");
 #endif
@@ -357,7 +360,7 @@ public:
 
     double BcastTime(CommModel * bcastModel) {
 
-#ifdef ATIMING
+#ifdef PROFILE
         auto stime1 = MPI_Wtime();
 #endif
 
@@ -366,7 +369,7 @@ public:
         int gridSize = (nodes*ppn) / layers; 
         double finalTime = singleBcastTime * sqrt(gridSize); 
 
-#ifdef ATIMING
+#ifdef PROFILE
         auto etime1 = MPI_Wtime();
         auto t1 = (etime1-stime1);
         debugPtr->Print("[Bcast calc time] " + std::to_string(t1) + "s");
@@ -512,7 +515,7 @@ public:
     template <typename P, typename I>
     P SearchBruteForce(I input) {
 
-#ifdef ATIMING
+#ifdef PROFILE
         auto stime1 = MPI_Wtime();
 #endif
 
@@ -524,21 +527,16 @@ public:
 
         for (P currParams : searchSpace) {
             double currTime = currParams.EstimateRuntime(input, platformParams);
-#ifdef DEBUG
-            debugPtr->Log("Finished estimation");
-#endif
             if (currTime<=bestTime) {
                 bestTime = currTime;
                 bestParams = currParams;
             }
-
 #ifdef DEBUG
             debugPtr->Log("Finished iteration");
 #endif
-
         }
 
-#ifdef ATIMING
+#ifdef PROFILE
         auto etime1 = MPI_Wtime();
         auto t1 = (etime1-stime1);
         debugPtr->Print("[SearchBruteForce] " + std::to_string(t1) + "s");
