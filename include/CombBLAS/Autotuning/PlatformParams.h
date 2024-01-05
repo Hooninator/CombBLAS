@@ -1,4 +1,6 @@
 
+#ifndef PLATFORMPARAMS_H
+#define PLATFORMPARAMS_H
 
 
 #include <exception>
@@ -50,3 +52,4 @@ PlatformParams perlmutterParams(3.9, 2406.87, 128, 4);
 
 } //autotuning
 }//combblas
+#endif
