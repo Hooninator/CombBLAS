@@ -154,8 +154,8 @@ public:
     }
 
 
+    /* Estimate time for all bcasts */
     double BcastTime(CommModel * bcastModel) {
-
 #ifdef PROFILE
         auto stime1 = MPI_Wtime();
 #endif
@@ -168,15 +168,32 @@ public:
 #ifdef PROFILE
         auto etime1 = MPI_Wtime();
         auto t1 = (etime1-stime1);
-        statPtr->Print("[Bcast calc time] " + std::to_string(t1) + "s");
         statPtr->Log("Bcast calc time " + std::to_string(t1) + "s");
 #endif
         return finalTime;
     }
 
 
+    /* Estimate time for local multiply */
+    //JB: two things to try here, complicated dist hash table based count, more accurate, but simple heuristic maybe enough
 
-    double LocalMultTime(){return 0;}
+    template <typename AIT, typename ANT, typename ADER, typename BIT, typename BNT, typename BDER>
+    double LocalMultTime(SpGEMM3DMatrixInfo<AIT, ANT, ADER>& Ainfo, SpGEMM3DMatrixInfo<BIT, BNT, BDER>& Binfo){
+#ifdef PROFILE
+        auto stime1 = MPI_Wtime();
+#endif
+        
+        AIT localGFLOPS = ApproxLocalFLOPSDensity(Ainfo, Binfo) / 1e9; 
+        double finalTime = localGFLOPS / 1.0;  
+
+#ifdef PROFILE
+        auto etime1 = MPI_Wtime();
+        auto t1 = (etime1-stime1);
+        statPtr->Log("LocalMult calc time " + std::to_string(t1) + "s");
+#endif
+        return 0;
+    }
+
     double LayerMergeTime(){return 0;}
     double AlltoAllTime(){return 0;}
     double MergeFiberTime(){return 0;}
@@ -189,14 +206,39 @@ public:
     IT ApproxLocalNnzDensity(SpGEMM3DMatrixInfo<IT,NT,DER>& Minfo) {
         int totalProcs = this->nodes * this->ppn;
 
-        IT localNcols = Minfo.GetNcols() / static_cast<IT>(sqrt(totalProcs));
-        IT localNrows = Minfo.GetNrows() / static_cast<IT>(sqrt(totalProcs));
+        IT localNcols = Minfo.LocalNcols(totalProcs);
+        IT localNrows = Minfo.LocalNrows(totalProcs);
         IT localMatSize = localNcols * localNrows;
 
         IT localNnzApprox = static_cast<IT>(Minfo.GetDensity() * localMatSize);
         return localNnzApprox;
     }
 
+    //JB: Could also try actually counting nnz given the initial 2D distribution
+    
+    
+    /* Approximate local FLOPS using density-based nnz estimation */
+    template <typename AIT, typename ANT, typename ADER, typename BIT, typename BNT, typename BDER>
+    AIT ApproxLocalFLOPSDensity(SpGEMM3DMatrixInfo<AIT, ANT, ADER>& Ainfo, SpGEMM3DMatrixInfo<BIT, BNT, BDER>& Binfo){
+        
+        AIT tileFLOPS = Ainfo.GetDensity() * Ainfo.LocalNrows() * // estimate nnz per col of A
+                        Binfo.GetDensity() * Binfo.LocalNrows() * // estimate nnz per col of B
+                        * Binfo.LocalNcols(); // once per col of B
+        AIT localFLOPS = tileFLOPS * static_cast<int>(this->nodes * this->ppn);
+
+#ifdef PROFILE
+        statPtr->Log("Local FLOPS " + std::to_string(localFLOPS));
+#endif
+
+        return localFLOPS; 
+ 
+    }
+
+
+    template <typename AIT, typename ANT, typename ADER, typename BIT, typename BNT, typename BDER>
+    AIT LocalFLOPSHash(SpGEMM3DMatrixInfo<AIT, ANT, ADER>& Ainfo, SpGEMM3DMatrixInfo<BIT, BNT, BDER>& Binfo){
+        
+    }
 
 
     /* UTILITY FUNCTIONS */

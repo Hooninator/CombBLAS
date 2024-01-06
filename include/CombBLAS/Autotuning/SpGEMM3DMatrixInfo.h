@@ -26,6 +26,9 @@ public:
     nnz(nnz), ncols(cols), nrows(rows) {
         density = static_cast<float>(nnz) / static_cast<float>(ncols*nrows);
     }
+    
+    inline IT LocalNcols(int totalProcs) const {return ncols / static_cast<IT>(sqrt(totalProcs));}
+    inline IT LocalNrows(int totalProcs) const {return nrows / static_cast<IT>(sqrt(totalProcs));}
 
     inline int GetIndexSize() const {return sizeof(IT);}
     inline int GetNzvalSize() const {return sizeof(NT);}

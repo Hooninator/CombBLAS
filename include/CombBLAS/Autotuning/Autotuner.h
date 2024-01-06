@@ -25,9 +25,9 @@ public:
     /* CONSTRUCTORS */
     
     //Calls measuring routines to create PlatformParams instance
-    Autotuner(): platformParams(PlatformParams()) {
-        ASSERT(initCalled, "Please call autotuning::Init() first.");
-    }
+//    Autotuner(): platformParams(PlatformParams()) {
+  //      ASSERT(initCalled, "Please call autotuning::Init() first.");
+   // }
     
 
     // Assumes PlatformParams has already been constructed
