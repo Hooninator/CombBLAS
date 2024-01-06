@@ -109,6 +109,7 @@ public:
             }
 #ifdef PROFILE
             statPtr->Log("Total runtime " + std::to_string(currTime)+"s");
+            statPtr->Log("\n");
 #endif
         }
 

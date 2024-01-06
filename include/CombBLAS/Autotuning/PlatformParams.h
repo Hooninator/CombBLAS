@@ -47,13 +47,13 @@ private:
     int coresPerNode;
     int devsPerNode;
     
-    long peakFLOPS; 
+    long peakFLOPS; //peak flops on a SINGLE core 
     
 };
 
 //Values obtained with osu microbenchmarks
-// peak = 3.5Ghz * 2 fmadd * 2 pipelines * 8 flops per vector register * 128 cores
-PlatformParams perlmutterParams(3.9, 2406.87, 128, 4, (3.5*1e9)*2*2*8*128);
+// peak = 3.5Ghz * 2 fmadd * 2 pipelines * 8 flops per vector register
+PlatformParams perlmutterParams(3.9, 2406.87, 128, 4, (3.5*1e9)*2*2*8);
 
 } //autotuning
 }//combblas

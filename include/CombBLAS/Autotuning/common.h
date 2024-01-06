@@ -39,6 +39,7 @@
 
 
 #define PROFILE 
+#define DEBUG
 
 #define ASSERT(condition, message) \
     do { \
@@ -136,11 +137,13 @@ void Init(JobManager jm) {
 #endif
 
 #ifdef PROFILE
+    //TODO: put matrix name in statfilename
     statPtr = new Logger(rank, "statfile-N"+std::to_string(jobPtr->nodes)+".out");
 #endif
 
     initCalled = true;
 }
+
 
 }//autotuning
 }//combblas

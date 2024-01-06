@@ -204,7 +204,7 @@ public:
         auto stime1 = MPI_Wtime();
 #endif
         
-        double finalTime = model->ComputeTime();
+        double finalTime = model->ComputeTime(0.1);
 
 #ifdef PROFILE
         auto etime1 = MPI_Wtime();
