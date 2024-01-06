@@ -70,8 +70,8 @@ private:
 
 };
 
-//computed using numpy.polyfit
-RegressionParams localSpGEMMRegressionPerlmutter {1.0, 1.0};
+//computed using numpy least squares fitting functionality
+RegressionParams localSpGEMMRegressionPerlmutter {7.7088997, 6.29007611};
 
 }//autotuning
 }//combblas
