@@ -11,6 +11,9 @@
 #include <cstdlib>
 #include <sstream>
 #include <limits>
+#include <functional>
+#include <exception>
+#include <string>
 
 #include "CombBLAS/SpMat.h"
 #include "CombBLAS/SpTuples.h"

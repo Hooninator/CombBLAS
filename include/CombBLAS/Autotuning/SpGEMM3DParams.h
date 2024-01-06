@@ -6,6 +6,7 @@
 #include "common.h"
 #include "SpGEMM3DMatrixInfo.h"
 #include "CommModel.h"
+#include "CompModel.h"
 #include "PlatformParams.h"
 
 
@@ -85,12 +86,14 @@ public:
 
         double bcastATime = BcastTime(bcastModelA);
         double bcastBTime = BcastTime(bcastModelB);
+        
+        CompModel *localMultModel = MakeLocalMultModelPeak(Ainfo, Binfo, platformParams);
+        double localMultTime = LocalMultTime(localMultModel);
 
 #ifdef PROFILE
-        statPtr->Print("[BcastA time] " + std::to_string(bcastATime/1e6) + "s");
-        statPtr->Print("[BcastB time] " + std::to_string(bcastBTime/1e6) + "s");
         statPtr->Log("BcastA time " + std::to_string(bcastATime/1e6) + "s");
         statPtr->Log("BcastB time " + std::to_string(bcastBTime/1e6) + "s");
+        statPtr->Log("LocalMult time " + std::to_string(localMultTime/1e6) + "s");
 #endif
         delete bcastModelA; delete bcastModelB;
 
@@ -174,24 +177,41 @@ public:
     }
 
 
+
+    /* LOCAL SpGEMM MODELS */
+    
+    template <typename AIT, typename ANT, typename ADER, typename BIT, typename BNT, typename BDER>
+    PeakCompModel * MakeLocalMultModelPeak(SpGEMM3DMatrixInfo<AIT, ANT, ADER>& Ainfo, 
+                                            SpGEMM3DMatrixInfo<BIT, BNT, BDER>& Binfo,
+                                            PlatformParams& params) {
+    
+        std::function<long()> _ComputeFLOPS = [&Ainfo, &Binfo, this]() {
+
+            return ApproxLocalMultFLOPSDensity(Ainfo, Binfo);    
+
+        };
+        
+        return new PeakCompModel(params.GetPeakFLOPS(), _ComputeFLOPS);
+    
+    } 
+    
+
     /* Estimate time for local multiply */
     //JB: two things to try here, complicated dist hash table based count, more accurate, but simple heuristic maybe enough
 
-    template <typename AIT, typename ANT, typename ADER, typename BIT, typename BNT, typename BDER>
-    double LocalMultTime(SpGEMM3DMatrixInfo<AIT, ANT, ADER>& Ainfo, SpGEMM3DMatrixInfo<BIT, BNT, BDER>& Binfo){
+    double LocalMultTime(CompModel * model){
 #ifdef PROFILE
         auto stime1 = MPI_Wtime();
 #endif
         
-        AIT localGFLOPS = ApproxLocalFLOPSDensity(Ainfo, Binfo) / 1e9; 
-        double finalTime = localGFLOPS / 1.0;  
+        double finalTime = model->ComputeTime();
 
 #ifdef PROFILE
         auto etime1 = MPI_Wtime();
         auto t1 = (etime1-stime1);
         statPtr->Log("LocalMult calc time " + std::to_string(t1) + "s");
 #endif
-        return 0;
+        return finalTime;
     }
 
     double LayerMergeTime(){return 0;}
@@ -219,12 +239,15 @@ public:
     
     /* Approximate local FLOPS using density-based nnz estimation */
     template <typename AIT, typename ANT, typename ADER, typename BIT, typename BNT, typename BDER>
-    AIT ApproxLocalFLOPSDensity(SpGEMM3DMatrixInfo<AIT, ANT, ADER>& Ainfo, SpGEMM3DMatrixInfo<BIT, BNT, BDER>& Binfo){
+    long ApproxLocalMultFLOPSDensity(SpGEMM3DMatrixInfo<AIT, ANT, ADER>& Ainfo, SpGEMM3DMatrixInfo<BIT, BNT, BDER>& Binfo){
         
-        AIT tileFLOPS = Ainfo.GetDensity() * Ainfo.LocalNrows() * // estimate nnz per col of A
-                        Binfo.GetDensity() * Binfo.LocalNrows() * // estimate nnz per col of B
-                        * Binfo.LocalNcols(); // once per col of B
-        AIT localFLOPS = tileFLOPS * static_cast<int>(this->nodes * this->ppn);
+        int totalProcs = this->nodes * this->ppn;
+        int gridSize = totalProcs / this->layers;
+        
+        long tileFLOPS = Ainfo.GetDensity() * Ainfo.LocalNrows(totalProcs) * // estimate nnz per col of A
+                        Binfo.GetDensity() * Binfo.LocalNrows(totalProcs) * // estimate nnz per col of B
+                        Binfo.LocalNcols(totalProcs); // once per col of B
+        long localFLOPS = tileFLOPS * static_cast<int>(sqrt(gridSize));
 
 #ifdef PROFILE
         statPtr->Log("Local FLOPS " + std::to_string(localFLOPS));

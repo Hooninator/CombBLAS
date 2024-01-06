@@ -1,13 +1,11 @@
 
+#ifndef COMMMODEL_H
+#define COMMMODEL_H
 
-#include <functional>
-#include <exception>
 
 #include "common.h"
 
 
-#ifndef COMMMODEL_H
-#define COMMMODEL_H
 
 namespace combblas {
 namespace autotuning {
@@ -36,7 +34,7 @@ public:
 
     }
 
-    inline double ComputeTime() {
+    double ComputeTime() {
         return ComputeNumMsgs() * alpha + (ComputeNumBytes())/beta;
     }
 
