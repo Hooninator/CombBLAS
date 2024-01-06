@@ -357,7 +357,8 @@ void MCLPruneRecoverySelect(SpParMat<IT,NT,DER> & A, NT hardThreshold, IT select
 
 template <typename SR, typename IU, typename NU1, typename NU2, typename UDERA, typename UDERB> 
 IU EstimateFLOP 
-		(SpParMat<IU,NU1,UDERA> & A, SpParMat<IU,NU2,UDERB> & B, bool clearA = false, bool clearB = false)
+		(SpParMat<IU,NU1,UDERA> & A, SpParMat<IU,NU2,UDERB> & B, bool clearA = false, bool clearB = false,
+            bool compute_local=false)
 
 {
     int myrank;
@@ -437,6 +438,8 @@ IU EstimateFLOP
 
 	//if(!clearB)
 	//	const_cast< UDERB* >(B.spSeq)->Transpose();	// transpose back to original
+    
+    if (compute_local) return local_flops;
 
     IU global_flops = 0;
     MPI_Allreduce(&local_flops, &global_flops, 1, MPI_LONG_LONG_INT, MPI_SUM, A.getcommgrid()->GetWorld());
