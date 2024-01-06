@@ -47,8 +47,10 @@ private:
 struct RegressionParams {double b; double m;} typedef RegressionParams;
 
 /* Use single-variable regression model T = mx + b  */
+//TODO: Try higher degree polynomials
 class RegressionCompModel : public CompModel {
     
+public:
 
     RegressionCompModel(RegressionParams& p, std::function<long()> ComputeFLOPS):
     b(p.b), m(p.m), ComputeFLOPS(ComputeFLOPS) 
@@ -58,8 +60,10 @@ class RegressionCompModel : public CompModel {
     
     double ComputeTime() {
 
-        double x = ComputeFLOPS();
-        return m*x + b;
+        long x = ComputeFLOPS();
+        double timeSeconds = m*x + b;
+        
+        return timeSeconds * 1e6; //convert to us
 
     }
 
@@ -71,7 +75,7 @@ private:
 };
 
 //computed using numpy least squares fitting functionality
-RegressionParams localSpGEMMRegressionPerlmutter {7.7088997, 6.29007611};
+RegressionParams regSpGEMMPerlmutter {1.41575143, 8.06541948e-07};
 
 }//autotuning
 }//combblas

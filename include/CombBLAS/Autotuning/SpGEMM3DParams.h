@@ -87,7 +87,7 @@ public:
         double bcastATime = BcastTime(bcastModelA);
         double bcastBTime = BcastTime(bcastModelB);
         
-        CompModel *localMultModel = MakeLocalMultModelPeak(Ainfo, Binfo, platformParams);
+        CompModel *localMultModel = MakeLocalMultModelReg(Ainfo, Binfo, platformParams);
         double localMultTime = LocalMultTime(localMultModel);
 
 #ifdef PROFILE
@@ -195,7 +195,21 @@ public:
     
     } 
     
+    template <typename AIT, typename ANT, typename ADER, typename BIT, typename BNT, typename BDER>
+    RegressionCompModel * MakeLocalMultModelReg(SpGEMM3DMatrixInfo<AIT, ANT, ADER>& Ainfo, 
+                                            SpGEMM3DMatrixInfo<BIT, BNT, BDER>& Binfo,
+                                            PlatformParams& params) {
+        
+        std::function<long()> _ComputeFLOPS = [&Ainfo, &Binfo, this]() {
 
+            return ApproxLocalMultFLOPSDensity(Ainfo, Binfo);    
+
+        };
+        
+        return new RegressionCompModel(autotuning::regSpGEMMPerlmutter, _ComputeFLOPS);
+
+    }
+    
     /* Estimate time for local multiply */
     //JB: two things to try here, complicated dist hash table based count, more accurate, but simple heuristic maybe enough
 
