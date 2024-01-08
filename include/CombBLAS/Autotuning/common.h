@@ -14,6 +14,8 @@
 #include <functional>
 #include <exception>
 #include <string>
+#include <algorithm>
+#include <numeric>
 
 #include "CombBLAS/SpMat.h"
 #include "CombBLAS/SpTuples.h"

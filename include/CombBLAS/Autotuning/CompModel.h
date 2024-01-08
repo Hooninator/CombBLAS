@@ -44,16 +44,13 @@ private:
 };
 
 
-struct RegressionParams {double b; double m;} typedef RegressionParams;
-
-/* Use single-variable regression model T = mx + b  */
-//TODO: Try higher degree polynomials
+/* T = P(x), P(x) = \sum_{i=0}^d(a*x^i) */
 class RegressionCompModel : public CompModel {
     
 public:
 
-    RegressionCompModel(RegressionParams& p, std::function<long()> ComputeFLOPS):
-    b(p.b), m(p.m), ComputeFLOPS(ComputeFLOPS) 
+    RegressionCompModel(std::vector<double>& coeffs, std::function<long()> ComputeFLOPS):
+    coeffs(coeffs), ComputeFLOPS(ComputeFLOPS) 
     {
         
     }
@@ -61,21 +58,30 @@ public:
     double ComputeTime() {
 
         long x = ComputeFLOPS();
-        double timeSeconds = m*x + b;
+        int i=0;
+
+        double timeSeconds = std::accumulate(coeffs.begin(), coeffs.end(), 0.0, [=](double sum, double a)mutable {
+            return sum + a*std::pow(x,i++);
+        });
         
         return timeSeconds * 1e6; //convert to us
 
     }
+    
+    inline int Degree() const {return coeffs.size();}
 
 private:
     
-    double b; double m;
+    std::vector<double> coeffs;
     std::function<long()> ComputeFLOPS;
 
 };
 
 //computed using numpy least squares fitting functionality
-RegressionParams regSpGEMMPerlmutter {1.41575143, 8.06541948e-07};
+//TODO: C++ program to do this
+//This is going to make things complicated...
+std::vector<double> regSpGEMMPerlmutter {1.41575143, 8.06541948e-07};
+
 
 }//autotuning
 }//combblas
