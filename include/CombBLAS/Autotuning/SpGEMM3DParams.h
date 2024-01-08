@@ -53,10 +53,10 @@ public:
     }
 
 
-    static std::vector<SpGEMM3DParams> ConstructSearchSpace() {
+    static std::vector<SpGEMM3DParams> ConstructSearchSpace(PlatformParams& params) {
         std::vector<SpGEMM3DParams> result;
         for (int _nodes = 1; _nodes<=jobPtr->nodes; _nodes*=2) {
-            for (int _ppn=1; _ppn<=jobPtr->tasksPerNode; _ppn*=2) {
+            for (int _ppn=1; _ppn<=params.GetCoresPerNode(); _ppn*=2) {
                 if (IsPerfectSquare(_ppn*_nodes)) {
                     for (int _layers=1; _layers<=_ppn*_nodes; _layers*=2) {
                         int gridSize = (_ppn*_nodes) / _layers;
@@ -261,7 +261,7 @@ public:
         long tileFLOPS = Ainfo.GetDensity() * Ainfo.LocalNrows(totalProcs) * // estimate nnz per col of A
                         Binfo.GetDensity() * Binfo.LocalNrows(totalProcs) * // estimate nnz per col of B
                         Binfo.LocalNcols(totalProcs); // once per col of B
-        long localFLOPS = tileFLOPS * static_cast<int>(sqrt(gridSize));
+        long localFLOPS = tileFLOPS * static_cast<int>(sqrt(gridSize)); //we do sqrt(gridSize) local multiplies
 
 #ifdef PROFILE
         statPtr->Log("Local FLOPS " + std::to_string(localFLOPS));
@@ -273,7 +273,7 @@ public:
 
 
     template <typename AIT, typename ANT, typename ADER, typename BIT, typename BNT, typename BDER>
-    AIT LocalFLOPSHash(SpGEMM3DMatrixInfo<AIT, ANT, ADER>& Ainfo, SpGEMM3DMatrixInfo<BIT, BNT, BDER>& Binfo){
+    AIT ApproxLocalMultFLOPSHash(SpGEMM3DMatrixInfo<AIT, ANT, ADER>& Ainfo, SpGEMM3DMatrixInfo<BIT, BNT, BDER>& Binfo){
         
     }
 

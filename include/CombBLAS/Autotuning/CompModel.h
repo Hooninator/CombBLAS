@@ -80,7 +80,7 @@ private:
 //computed using numpy least squares fitting functionality
 //TODO: C++ program to do this
 //This is going to make things complicated...
-std::vector<double> regSpGEMMPerlmutter {1.41575143, 8.06541948e-07};
+std::vector<double> regSpGEMMPerlmutter {2.7447, 5.2422e-07};
 
 
 }//autotuning

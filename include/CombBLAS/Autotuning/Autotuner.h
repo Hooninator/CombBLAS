@@ -88,7 +88,7 @@ public:
         auto stime1 = MPI_Wtime();
 #endif
 
-        auto searchSpace = P::ConstructSearchSpace();
+        auto searchSpace = P::ConstructSearchSpace(platformParams);
         ASSERT(searchSpace.size()>0, "Search space is of size 0!");
 
 #ifdef PROFILE
