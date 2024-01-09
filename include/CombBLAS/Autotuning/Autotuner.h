@@ -24,11 +24,6 @@ public:
     
     /* CONSTRUCTORS */
     
-    //Calls measuring routines to create PlatformParams instance
-//    Autotuner(): platformParams(PlatformParams()) {
-  //      ASSERT(initCalled, "Please call autotuning::Init() first.");
-   // }
-    
 
     // Assumes PlatformParams has already been constructed
     Autotuner(PlatformParams& params): platformParams(params) {
@@ -47,7 +42,13 @@ public:
     /* Main tuning routine for CPU 3DSpGEMM */
     //TODO: Make the tuning method parameter a std::function instance
     template <typename AIT, typename ANT, typename ADER, typename BIT, typename BNT, typename BDER>
-    SpGEMM3DParams TuneSpGEMM3D(SpParMat<AIT, ANT, ADER>& A, SpParMat<BIT, BNT, BDER>& B, TuningMethod method){
+    SpGEMM3DParams TuneSpGEMM3D(SpParMat<AIT, ANT, ADER>& A, SpParMat<BIT, BNT, BDER>& B, TuningMethod method,
+                                    std::string& matpath){
+
+#ifdef PROFILE
+        std::string matname = ExtractMatName(matpath);
+        statPtr = new Logger(rank, "statfile-N"+std::to_string(jobPtr->nodes)+"-"+matname+".out");
+#endif
         
         SpParMat3D<AIT, ANT, ADER> A3D(A, 1, true, false);
         SpParMat3D<BIT, BNT, BDER> B3D(B, 1, false, false);

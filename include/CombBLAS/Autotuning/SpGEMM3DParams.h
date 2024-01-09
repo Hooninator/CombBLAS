@@ -5,6 +5,7 @@
 
 #include "common.h"
 #include "SpGEMM3DMatrixInfo.h"
+#include "SymbolicSpParMat3D.h"
 #include "CommModel.h"
 #include "CompModel.h"
 #include "PlatformParams.h"
@@ -238,14 +239,14 @@ public:
     /* Approximate local nnz using matrix density */
     template <typename IT, typename NT, typename DER>
     IT ApproxLocalNnzDensity(SpGEMM3DMatrixInfo<IT,NT,DER>& Minfo) {
-        int totalProcs = this->nodes * this->ppn;
+        int totalProcs = this->nodes * this->ppn ;
 
         IT localNcols = Minfo.LocalNcols(totalProcs);
         IT localNrows = Minfo.LocalNrows(totalProcs);
         IT localMatSize = localNcols * localNrows;
 
         IT localNnzApprox = static_cast<IT>(Minfo.GetDensity() * localMatSize);
-        return localNnzApprox;
+        return localNnzApprox ;
     }
 
     //JB: Could also try actually counting nnz given the initial 2D distribution
