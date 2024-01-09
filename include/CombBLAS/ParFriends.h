@@ -384,6 +384,7 @@ IU EstimateFLOP
 	int Aself = (A.commGrid)->GetRankInProcRow();
 	int Bself = (B.commGrid)->GetRankInProcCol();	
 	
+    
 	for(int i = 0; i < stages; ++i) 
 	{
 		std::vector<IU> ess;	
@@ -400,8 +401,11 @@ IU EstimateFLOP
 			}
 			ARecv = new UDERA();				// first, create the object
 		}
+        
+        
 		SpParHelper::BCastMatrix(GridC->GetRowWorld(), *ARecv, ess, i);	// then, receive its elements
 		ess.clear();
+
 		
 		if(i == Bself)
 		{
@@ -416,13 +420,18 @@ IU EstimateFLOP
 			}	
 			BRecv = new UDERB();
 		}
+
+        
 		SpParHelper::BCastMatrix(GridC->GetColWorld(), *BRecv, ess, i);	// then, receive its elements
 
-		local_flops += EstimateLocalFLOP<SR>
-						(*ARecv, *BRecv, // parameters themselves
-						i != Aself, 	// 'delete A' condition
-						i != Bself);	// 'delete B' condition
+
+        if (ARecv->getnnz()!=0 && BRecv->getnnz()!=0)
+            local_flops += EstimateLocalFLOP<SR>
+                            (*ARecv, *BRecv, // parameters themselves
+                            i != Aself, 	// 'delete A' condition
+                            i != Bself);	// 'delete B' condition
 	}
+    
 
 	if(clearA && A.spSeq != NULL) {	
 		delete A.spSeq;
@@ -435,6 +444,7 @@ IU EstimateFLOP
 
 	SpHelper::deallocate2D(ARecvSizes, UDERA::esscount);
 	SpHelper::deallocate2D(BRecvSizes, UDERB::esscount);
+    
 
 	//if(!clearB)
 	//	const_cast< UDERB* >(B.spSeq)->Transpose();	// transpose back to original
