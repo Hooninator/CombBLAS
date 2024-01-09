@@ -1,13 +1,7 @@
 
 
-#include <iostream>
-#include <fstream>
-#include <cmath>
-#include <vector>
-#include <iterator>
-#include <cassert>
-#include <cstdlib>
-
+#include "common.h"
+#include <upcxx/upcxx.hpp>
 
 
 
@@ -16,8 +10,13 @@ namespace combblas {
 
 namespace autotuning {
 
-template <typename AIT, typename ANT, typename ADER, typename BIT, typename BNT, typename BDER>
+template <typename IT, typename NT, typename DER>
 class SymbolicSpParMat3D {
+    
+    typedef SpParMat3D<IT,NT,DER> Mat;    
+
+public:
+
 
 };
 
