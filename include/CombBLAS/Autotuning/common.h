@@ -16,6 +16,7 @@
 #include <string>
 #include <algorithm>
 #include <numeric>
+#include <upcxx/upcxx.hpp>
 
 #include "CombBLAS/SpMat.h"
 #include "CombBLAS/SpTuples.h"
@@ -123,7 +124,7 @@ void Init(JobManager jm) {
 
     int initialized;
     MPI_Initialized(&initialized);
-    ASSERT(initialized==1, "Please call MPI_Init() before calling this method");
+    ASSERT(initialized==1, "Please call MPI_Init() before calling this function");
 
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &worldSize);
@@ -143,7 +144,28 @@ void Init(JobManager jm) {
     statPtr = new Logger(rank, "statfile-N"+std::to_string(jobPtr->nodes)+".out");
 #endif
 
+    upcxx::init();
+
     initCalled = true;
+}
+
+
+void Finalize() {
+    
+    ASSERT(initCalled, "Please call autotuning::Init() first");
+
+#ifdef PROFILE
+    delete statPtr;
+#endif
+
+#ifdef DEBUG
+    delete debugPtr;
+#endif
+
+    delete jobPtr;
+    
+    upcxx::finalize();
+
 }
 
 
