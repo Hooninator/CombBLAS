@@ -21,16 +21,21 @@ public:
 
     //alpha is us
     //beta is bytes/us
-    PlatformParams(float internodeAlpha, float internodeBeta, int coresPerNode, int devsPerNode, long peakFLOPS): 
-    internodeAlpha(internodeAlpha), internodeBeta(internodeBeta), coresPerNode(coresPerNode), devsPerNode(devsPerNode),
+    PlatformParams(float internodeAlpha, float internodeBeta, float intranodeBeta, 
+                    int coresPerNode, int devsPerNode, 
+                    long peakFLOPS): 
+    internodeAlpha(internodeAlpha), internodeBeta(internodeBeta), intranodeBeta(intranodeBeta), 
+    coresPerNode(coresPerNode), devsPerNode(devsPerNode),
     peakFLOPS(peakFLOPS)
     {}
     ~PlatformParams(){}
     
     inline float GetInternodeAlpha() const {return internodeAlpha;} 
     inline float GetInternodeBeta() const {return internodeBeta;} 
+    inline float GetIntranodeBeta() const {return intranodeBeta;}
     inline int GetCoresPerNode() const {return coresPerNode;}
     inline int GetDevsPerNode() const {return devsPerNode;}
+    
     
     //TODO: Measure local SpGEMM FLOPS and use that instead
     inline long GetPeakFLOPS() const {return peakFLOPS;}
@@ -43,6 +48,8 @@ private:
     
     float internodeAlpha;
     float internodeBeta;
+    
+    float intranodeBeta;
 
     int coresPerNode;
     int devsPerNode;
@@ -53,7 +60,7 @@ private:
 
 //Values obtained with osu microbenchmarks
 // peak = 3.5Ghz * 2 fmadd * 2 pipelines * 8 flops per vector register
-PlatformParams perlmutterParams(3.9, 2406.87, 128, 4, (3.5*1e9)*2*2*8);
+PlatformParams perlmutterParams(3.9, 2406.87, 4234.33, 128, 4, (3.5*1e9)*2*2*8);
 
 } //autotuning
 }//combblas

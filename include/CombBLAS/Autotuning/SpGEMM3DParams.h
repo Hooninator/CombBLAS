@@ -97,6 +97,7 @@ public:
         statPtr->Log("LocalMult time " + std::to_string(localMultTime/1e6) + "s");
 #endif
         delete bcastModelA; delete bcastModelB;
+        delete localMultModel;
 
         return 0;
     }
@@ -153,7 +154,7 @@ public:
 
         }
 
-        return new PostCommModel<IT>(params.GetInternodeAlpha(), params.GetInternodeBeta(),
+        return new PostCommModel<IT>(params.GetInternodeAlpha(), params.GetInternodeBeta(), params.GetIntranodeBeta(),
                                     _ComputeNumMsgs, _ComputeNumBytes);
     }
 
@@ -163,10 +164,13 @@ public:
 #ifdef PROFILE
         auto stime1 = MPI_Wtime();
 #endif
-
-        double singleBcastTime = bcastModel->ComputeTime();
-
         int gridSize = (nodes*ppn) / layers;
+        
+        //hack
+        bool inter=true;
+        
+        double singleBcastTime = bcastModel->ComputeTime(inter);
+
         double finalTime = singleBcastTime * sqrt(gridSize);
 
 #ifdef PROFILE
@@ -236,7 +240,9 @@ public:
 
     /* Approximation functions  */
 
-    /* Approximate local nnz using matrix density */
+    /* Approximate local nnz using matrix density 
+     * This actually just computes the avg nnz per processor
+     */
     template <typename IT, typename NT, typename DER>
     IT ApproxLocalNnzDensity(SpGEMM3DMatrixInfo<IT,NT,DER>& Minfo) {
         int totalProcs = this->nodes * this->ppn ;
@@ -259,10 +265,10 @@ public:
         int totalProcs = this->nodes * this->ppn;
         int gridSize = totalProcs / this->layers;
         
-        long tileFLOPS = Ainfo.GetDensity() * Ainfo.LocalNrows(totalProcs) * // estimate nnz per col of A
-                        Binfo.GetDensity() * Binfo.LocalNrows(totalProcs) * // estimate nnz per col of B
-                        Binfo.LocalNcols(totalProcs); // once per col of B
-        long localFLOPS = tileFLOPS * static_cast<int>(sqrt(gridSize)); //we do sqrt(gridSize) local multiplies
+        long tileFLOPS = Ainfo.GetDensity() * (Ainfo.GetNrows() / LongSqrt(gridSize)) * // estimate nnz per col of A
+                        Binfo.GetDensity() * (Binfo.GetNrows() / (this->layers * LongSqrt(gridSize))) * // estimate nnz per col of B
+                        (Binfo.GetNcols() / LongSqrt(gridSize)); // once per col of B
+        long localFLOPS = tileFLOPS * LongSqrt(gridSize); //we do sqrt(gridSize) local multiplies
 
 #ifdef PROFILE
         statPtr->Log("Local FLOPS " + std::to_string(localFLOPS));
@@ -274,7 +280,7 @@ public:
 
 
     template <typename AIT, typename ANT, typename ADER, typename BIT, typename BNT, typename BDER>
-    AIT ApproxLocalMultFLOPSHash(SpGEMM3DMatrixInfo<AIT, ANT, ADER>& Ainfo, SpGEMM3DMatrixInfo<BIT, BNT, BDER>& Binfo){
+    AIT ApproxLocalMultFLOPSSymb(SpGEMM3DMatrixInfo<AIT, ANT, ADER>& Ainfo, SpGEMM3DMatrixInfo<BIT, BNT, BDER>& Binfo){
         
     }
 
@@ -285,6 +291,10 @@ public:
         int root = static_cast<int>(sqrt(num));
         return root*root==num;
     }
+
+    
+    template <typename T>
+    inline T LongSqrt(T n) {return static_cast<long>(sqrt(n));}
 
 
 
