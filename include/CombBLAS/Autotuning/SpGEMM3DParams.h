@@ -82,11 +82,13 @@ public:
         auto Ainfo = inputs.Ainfo;
         auto Binfo = inputs.Binfo;
 
-        CommModel *bcastModelA = MakeBcastModelPost(Ainfo, platformParams, BCAST_TREE);
-        CommModel *bcastModelB = MakeBcastModelPost(Binfo, platformParams, BCAST_TREE);
+        CommModel<AIT> *bcastModel = new PostCommModel<AIT>(platformParams.GetInternodeAlpha(),
+                                                    platformParams.GetInternodeBeta(),
+                                                     platformParams.GetIntranodeBeta());
+        //MakeBcastModelPost(Ainfo, platformParams, BCAST_TREE);
 
-        double bcastATime = BcastTime(bcastModelA);
-        double bcastBTime = BcastTime(bcastModelB);
+        double bcastATime = BcastTime(bcastModel, Ainfo, platformParams);
+        double bcastBTime = BcastTime(bcastModel, Binfo, platformParams);
         
         CompModel *localMultModel = MakeLocalMultModelReg(Ainfo, Binfo, platformParams);
         double localMultTime = LocalMultTime(localMultModel);
@@ -96,7 +98,7 @@ public:
         statPtr->Log("BcastB time " + std::to_string(bcastBTime/1e6) + "s");
         statPtr->Log("LocalMult time " + std::to_string(localMultTime/1e6) + "s");
 #endif
-        delete bcastModelA; delete bcastModelB;
+        delete bcastModel;
         delete localMultModel;
 
         return 0;
@@ -110,75 +112,87 @@ public:
         BCAST_RING
     } typedef BcastAlgorithm;
 
-    enum BcastWorld {
-        BCAST_ROW,
-        BCAST_COL
-    } typedef BcastWorld;
-
+    /* Estimate time for all bcasts */
 
     template <typename IT, typename NT, typename DER>
-    PostCommModel<IT> * MakeBcastModelPost(SpGEMM3DMatrixInfo<IT,NT,DER>& Minfo, PlatformParams &params, 
-                                            BcastAlgorithm alg) {
-
-        std::function<int()> _ComputeNumMsgs;
-        std::function<IT()> _ComputeNumBytes;
-
-        switch(alg) {
-
-            case BCAST_TREE:
-            {
-                _ComputeNumMsgs = [this]() {
-                    int bcastWorldSize = static_cast<int>(sqrt( (this->nodes*this->ppn) / this->layers ));
-                    return static_cast<int>(log2(bcastWorldSize));
-                };
-
-                _ComputeNumBytes = [&Minfo, this]() {
-
-                    IT localNnzApprox = ApproxLocalNnzDensity(Minfo);
-
-                    IT sendBytes = localNnzApprox * Minfo.GetNzvalSize() +
-                                    localNnzApprox * Minfo.GetIndexSize() +
-                                    (localNnzApprox + 1) * Minfo.GetIndexSize();
-
-                    int bcastWorldSize = static_cast<int>(sqrt(this->nodes*this->ppn / this->layers));
-                    IT totalBytes = sendBytes*static_cast<IT>(log2(bcastWorldSize));
-#ifdef PROFILE
-                    statPtr->Log("Local nnz estimate: " + std::to_string(localNnzApprox));
-                    statPtr->Log("Send bytes estimate: " + std::to_string(totalBytes));
-#endif
-                    return totalBytes;
-                };
-
-                break;
-            }
-
-        }
-
-        return new PostCommModel<IT>(params.GetInternodeAlpha(), params.GetInternodeBeta(), params.GetIntranodeBeta(),
-                                    _ComputeNumMsgs, _ComputeNumBytes);
-    }
-
-
-    /* Estimate time for all bcasts */
-    double BcastTime(CommModel * bcastModel) {
+    double BcastTime(CommModel<IT> * bcastModel, SpGEMM3DMatrixInfo<IT,NT,DER>& Minfo, PlatformParams &params) {
 #ifdef PROFILE
         auto stime1 = MPI_Wtime();
 #endif
+
         int gridSize = (nodes*ppn) / layers;
         
-        //hack
-        bool inter=true;
+        CommOpts * opts = new CommOpts{
+            gridSize <= params.GetCoresPerNode() ? true : false //intranode
+        };
+
+        CommInfo<IT> * info = MakeBcastCommInfo(Minfo, params);
         
-        double singleBcastTime = bcastModel->ComputeTime(inter);
+        double singleBcastTime = bcastModel->ComputeTime(info, opts);
 
         double finalTime = singleBcastTime * sqrt(gridSize);
 
+        delete info;
+        
 #ifdef PROFILE
         auto etime1 = MPI_Wtime();
         auto t1 = (etime1-stime1);
         statPtr->Log("Bcast calc time " + std::to_string(t1) + "s");
 #endif
         return finalTime;
+    }
+
+
+    template <typename IT, typename NT, typename DER>
+    CommInfo<IT> * MakeBcastCommInfo(SpGEMM3DMatrixInfo<IT,NT,DER>& Minfo, PlatformParams &params) {
+        
+        IT localNnzApprox = ApproxLocalNnzDensity(Minfo);
+        IT msgSize = localNnzApprox * Minfo.GetNzvalSize() +
+                        localNnzApprox * Minfo.GetIndexSize() +
+                        (localNnzApprox + 1) * Minfo.GetIndexSize();
+
+        int bcastWorldSize = static_cast<int>(sqrt( (this->nodes*this->ppn) / this->layers ));
+
+        BcastAlgorithm alg = SelectBcastAlg(msgSize);
+        
+        CommInfo<IT> * info = new CommInfo<IT>();
+
+        switch(alg) {
+
+            case BCAST_TREE:
+            {
+
+                info->numMsgs = static_cast<int>(log2(bcastWorldSize));
+                info->numBytes = msgSize*static_cast<IT>(log2(bcastWorldSize));
+
+                break;
+            }
+            
+            case BCAST_RING:
+            {
+
+                info->numMsgs = static_cast<int>(log2(bcastWorldSize)) + (bcastWorldSize-1);
+                info->numBytes = static_cast<IT>(std::lround(msgSize*2*( static_cast<float>(bcastWorldSize - 1) / 
+                                                                            static_cast<float>(bcastWorldSize) )));
+
+                break;
+            }
+
+#ifdef PROFILE
+            statPtr->Log("Local nnz estimate: " + std::to_string(localNnzApprox));
+            statPtr->Log("Send bytes estimate: " + std::to_string(info->numBytes));
+            statPtr->Log("Num msgs: " + std::to_string(info->numMsgs));
+#endif
+        }
+        
+        return info;
+
+    }
+
+    template <typename IT>
+    BcastAlgorithm SelectBcastAlg(IT msgSize) {
+        /*TODO*/
+        return BCAST_TREE;
     }
 
 
@@ -294,7 +308,7 @@ public:
 
     
     template <typename T>
-    inline T LongSqrt(T n) {return static_cast<long>(sqrt(n));}
+    inline long LongSqrt(T n) {return static_cast<long>(sqrt(n));}
 
 
 

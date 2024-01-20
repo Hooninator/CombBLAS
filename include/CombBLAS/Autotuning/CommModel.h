@@ -10,14 +10,27 @@
 namespace combblas {
 namespace autotuning {
 
+/* Dataclass containing information a CommModel needs to compute communication time */
+template <typename IT>
+struct CommInfo {
+    int numMsgs;
+    IT numBytes;
+};
+
+/* Dataclass containing options that determine CommModel behavior  */
+struct CommOpts {
+    bool intranode; //If true, use intranode bandwidth
+};
+
 
 /* Generic model for communication time */
+template <typename IT>
 class CommModel {
 
 public:
     CommModel(){}
 
-    virtual double ComputeTime(bool inter) {throw std::runtime_error("This method should never be called");}
+    virtual double ComputeTime(CommInfo<IT> * info, CommOpts * opts) {throw std::runtime_error("This method should never be called");}
 
     virtual int GetWorld() {throw std::runtime_error("This method should never be called");}
 
@@ -26,29 +39,30 @@ public:
 
 /* T = alpha + bytes/beta */
 template <typename IT>
-class PostCommModel : public CommModel {
+class PostCommModel : public CommModel<IT> {
 
 public:
 
-    PostCommModel(double alpha, double internodeBeta, double intranodeBeta, 
-                    std::function<int()> ComputeNumMsgs, std::function<IT()> ComputeNumBytes):
-        alpha(alpha), internodeBeta(internodeBeta), intranodeBeta(intranodeBeta), 
-        ComputeNumMsgs(ComputeNumMsgs), ComputeNumBytes(ComputeNumBytes)
+    PostCommModel(double alpha, double internodeBeta, double intranodeBeta):
+        alpha(alpha), internodeBeta(internodeBeta), intranodeBeta(intranodeBeta) 
     {
 
     }
 
-    double ComputeTime(bool inter) {
-        if (inter)
-            return ComputeNumMsgs() * alpha + (ComputeNumBytes())/internodeBeta;
+    double ComputeTime(CommInfo<IT> * info, CommOpts * opts) {
+        double beta;
+        
+        if (opts->intranode)
+            beta = intranodeBeta;
         else
-            return ComputeNumMsgs() * alpha + (ComputeNumBytes())/intranodeBeta;
-    }
+            beta = internodeBeta;
+        
+        return info->numMsgs*alpha + info->numBytes/beta;
+    }   
 
 private:
     double alpha; double internodeBeta; double intranodeBeta;
     int coresPerNode;
-    std::function<int()> ComputeNumMsgs; std::function<IT()> ComputeNumBytes;
 
 };
 
