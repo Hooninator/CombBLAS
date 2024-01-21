@@ -85,7 +85,7 @@ public:
         CommModel<AIT> *bcastModel = new PostCommModel<AIT>(platformParams.GetInternodeAlpha(),
                                                     platformParams.GetInternodeBeta(),
                                                      platformParams.GetIntranodeBeta());
-        //MakeBcastModelPost(Ainfo, platformParams, BCAST_TREE);
+        //MakeBcastModelPost(Ainfo, platformParams, BCAST_BIN_TREE);
 
         double bcastATime = BcastTime(bcastModel, Ainfo, platformParams);
         double bcastBTime = BcastTime(bcastModel, Binfo, platformParams);
@@ -108,8 +108,13 @@ public:
     /* BROADCAST MODELS */
 
     enum BcastAlgorithm {
-        BCAST_TREE,
-        BCAST_RING
+        BCAST_LINEAR, // Root uses nonblocking sends to send data to all processors
+        BCAST_CHAIN, // Pass message along each processor in the communicator
+        BCAST_SPLIT_BIN_TREE, // Split message at root of tree, move each half down each half of the tree, leaves swap halves
+        BCAST_BIN_TREE, // Standard
+        BCAST_BINOMIAL, // 
+        BCAST_KNOMIAL, //
+        BCAST_SCATTER_ALLGATHER // Reserved for large messages and communicator sizes
     } typedef BcastAlgorithm;
 
     /* Estimate time for all bcasts */
@@ -153,13 +158,29 @@ public:
 
         int bcastWorldSize = static_cast<int>(sqrt( (this->nodes*this->ppn) / this->layers ));
 
-        BcastAlgorithm alg = SelectBcastAlg(msgSize);
+        BcastAlgorithm alg = SelectBcastAlg(msgSize, bcastWorldSize);
         
         CommInfo<IT> * info = new CommInfo<IT>();
 
         switch(alg) {
 
-            case BCAST_TREE:
+            case BCAST_LINEAR:
+            {
+
+                break;
+            }
+
+            case BCAST_CHAIN:
+            {
+                break;
+            }
+
+            case BCAST_SPLIT_BIN_TREE:
+            {
+                break;
+            }
+
+            case BCAST_BIN_TREE:
             {
 
                 info->numMsgs = static_cast<int>(log2(bcastWorldSize));
@@ -167,8 +188,18 @@ public:
 
                 break;
             }
+
+            case BCAST_BINOMIAL:
+            {
+                break;
+            }
+
+            case BCAST_KNOMIAL:
+            {
+                break;
+            }
             
-            case BCAST_RING:
+            case BCAST_SCATTER_ALLGATHER:
             {
 
                 info->numMsgs = static_cast<int>(log2(bcastWorldSize)) + (bcastWorldSize-1);
@@ -177,6 +208,12 @@ public:
 
                 break;
             }
+
+            default:
+            {
+                throw std::runtime_error("Bcast algorithm " + std::to_string(alg) + " not supported");
+		    }	
+            
 
 #ifdef PROFILE
             statPtr->Log("Local nnz estimate: " + std::to_string(localNnzApprox));
@@ -188,11 +225,71 @@ public:
         return info;
 
     }
-
+    
+    //JB: See https://github.com/open-mpi/ompi/blob/f0261cbef73897133177f17351b80eee6111f1bf/ompi/mca/coll/tuned/coll_tuned_decision_fixed.c#L512
+	// This is pretty much ripped from this function 
     template <typename IT>
-    BcastAlgorithm SelectBcastAlg(IT msgSize) {
-        /*TODO*/
-        return BCAST_TREE;
+    BcastAlgorithm SelectBcastAlg(IT msgSize, int commSize) {
+        
+        //JB: For now, only support decisions for up to communicator size of 16, just to see if this is a decent idea first
+		BcastAlgorithm alg;
+        
+		if (commSize < 4) {
+			if (msgSize < 32) {
+				alg = BCAST_LINEAR;
+			} else if (msgSize < 256) {
+				alg = BCAST_BIN_TREE;
+			} else if (msgSize < 512) {
+				alg = BCAST_LINEAR;;
+			} else if (msgSize < 1024) {
+				alg = BCAST_KNOMIAL;
+			} else if (msgSize < 32768) {
+				alg = BCAST_LINEAR;
+			} else if (msgSize < 131072) {
+				alg = BCAST_BIN_TREE;
+			} else if (msgSize < 262144) {
+				alg = BCAST_CHAIN;
+			} else if (msgSize < 524288) {
+				alg = BCAST_LINEAR;
+			} else if (msgSize < 1048576) {
+				alg = BCAST_BINOMIAL;
+			} else {
+				alg = BCAST_BIN_TREE;
+			}
+		} else if (commSize < 8) {
+			if (msgSize < 64) {
+				alg = BCAST_BIN_TREE;
+			} else if (msgSize < 128) {
+				alg = BCAST_BINOMIAL;
+			} else if (msgSize < 2048) {
+				alg = BCAST_BIN_TREE;
+			} else if (msgSize < 8192) {
+				alg = BCAST_BINOMIAL;
+			} else if (msgSize < 1048576) {
+				alg = BCAST_LINEAR;
+			} else {
+				alg = BCAST_CHAIN;
+			}
+		} else if (commSize < 16) {
+			if (msgSize < 8) {
+				alg = BCAST_KNOMIAL;
+			} else if (msgSize < 64) {
+				alg = BCAST_BIN_TREE;
+			} else if (msgSize < 4096) {
+				alg = BCAST_KNOMIAL;
+			} else if (msgSize < 16384) {
+				alg = BCAST_BIN_TREE;
+			} else if (msgSize < 32768) {
+				alg = BCAST_BINOMIAL;
+			} else {
+				alg = BCAST_LINEAR;
+			}
+		} else {
+			throw std::runtime_error("Larger comm sizes not supported yet");
+		}
+		
+		return alg;
+
     }
 
 
