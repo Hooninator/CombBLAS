@@ -131,7 +131,7 @@ public:
             gridSize <= params.GetCoresPerNode() ? true : false //intranode
         };
 
-        CommInfo<IT> * info = MakeBcastCommInfo(Minfo, params);
+        CommInfo<IT> * info = MakeBcastCommInfoPost(Minfo, params);
         
         double singleBcastTime = bcastModel->ComputeTime(info, opts);
 
@@ -148,8 +148,9 @@ public:
     }
 
 
+    /* Compute msg size, number of msgs, and broadcast algorithm to be used */
     template <typename IT, typename NT, typename DER>
-    CommInfo<IT> * MakeBcastCommInfo(SpGEMM3DMatrixInfo<IT,NT,DER>& Minfo, PlatformParams &params) {
+    CommInfo<IT> * MakeBcastCommInfoPost(SpGEMM3DMatrixInfo<IT,NT,DER>& Minfo, PlatformParams &params) {
         
         IT localNnzApprox = ApproxLocalNnzDensity(Minfo);
         IT msgSize = localNnzApprox * Minfo.GetNzvalSize() +
@@ -162,40 +163,62 @@ public:
         
         CommInfo<IT> * info = new CommInfo<IT>();
 
+        //JB: See https://www.sciencedirect.com/science/article/pii/S0743731522000697
         switch(alg) {
 
             case BCAST_LINEAR:
             {
-
+                info->numMsgs = bcastWorldSize;
+                info->numBytes = static_cast<IT>(msgSize*bcastWorldSize);
                 break;
             }
 
-            case BCAST_CHAIN:
+            case BCAST_CHAIN: //JB: Why would you ever use this one, binomial seems unambiguously superior?
             {
+                //Assume split into segments equal to the number of processors
+                size_t numSegs = bcastWorldSize;
+                size_t segSize = msgSize / numSegs;
+                info->numMsgs = bcastWorldSize + (numSegs) - 2;
+                info->numBytes = segSize * info->numMsgs; 
                 break;
             }
 
             case BCAST_SPLIT_BIN_TREE:
             {
+                //TODO
                 break;
             }
 
             case BCAST_BIN_TREE:
             {
-
+                //TODO: Paper claims this one is also segment-based
                 info->numMsgs = static_cast<int>(log2(bcastWorldSize));
                 info->numBytes = msgSize*static_cast<IT>(log2(bcastWorldSize));
-
                 break;
             }
 
             case BCAST_BINOMIAL:
             {
+                //Assume split into segments equal to the number of processors
+                size_t numSegs = bcastWorldSize;
+                size_t segSize = msgSize / numSegs;
+                info->numMsgs = static_cast<int>(log2(bcastWorldSize)) + numSegs - 1;
+                info->numBytes = segSize * info->numMsgs;
                 break;
             }
 
             case BCAST_KNOMIAL:
             {
+                //Assume split into segments equal to the number of processors
+                size_t numSegs = bcastWorldSize;
+                size_t segSize = msgSize / numSegs;
+
+                //Assume radix=4 arbitrarily
+                size_t radix = 4;
+
+                info->numMsgs = (radix - 1) * static_cast<int>(log2(bcastWorldSize) / log2(radix) ); 
+                info->numBytes = segSize * info->numMsgs;
+
                 break;
             }
             
@@ -205,7 +228,6 @@ public:
                 info->numMsgs = static_cast<int>(log2(bcastWorldSize)) + (bcastWorldSize-1);
                 info->numBytes = static_cast<IT>(std::lround(msgSize*2*( static_cast<float>(bcastWorldSize - 1) / 
                                                                             static_cast<float>(bcastWorldSize) )));
-
                 break;
             }
 
@@ -213,12 +235,12 @@ public:
             {
                 throw std::runtime_error("Bcast algorithm " + std::to_string(alg) + " not supported");
 		    }	
-            
 
 #ifdef PROFILE
+            statPtr->Log("Bcast algorithm: " + std::to_string(alg));
             statPtr->Log("Local nnz estimate: " + std::to_string(localNnzApprox));
             statPtr->Log("Send bytes estimate: " + std::to_string(info->numBytes));
-            statPtr->Log("Num msgs: " + std::to_string(info->numMsgs));
+            statPtr->Log("Num msgs estimate: " + std::to_string(info->numMsgs));
 #endif
         }
         
@@ -236,11 +258,11 @@ public:
         
 		if (commSize < 4) {
 			if (msgSize < 32) {
-				alg = BCAST_LINEAR;
+				alg = BCAST_LINEAR; //JB: technically this one should be pipeline but probably does not matter
 			} else if (msgSize < 256) {
 				alg = BCAST_BIN_TREE;
 			} else if (msgSize < 512) {
-				alg = BCAST_LINEAR;;
+				alg = BCAST_LINEAR;
 			} else if (msgSize < 1024) {
 				alg = BCAST_KNOMIAL;
 			} else if (msgSize < 32768) {
