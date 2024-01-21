@@ -112,10 +112,11 @@ public:
         BCAST_CHAIN, // Pass message along each processor in the communicator
         BCAST_SPLIT_BIN_TREE, // Split message at root of tree, move each half down each half of the tree, leaves swap halves
         BCAST_BIN_TREE, // Standard
-        BCAST_BINOMIAL, // 
-        BCAST_KNOMIAL, //
+        BCAST_BINOMIAL, // Split message and use binomial tree 
+        BCAST_KNOMIAL, // ditto, but tree with radix k
         BCAST_SCATTER_ALLGATHER // Reserved for large messages and communicator sizes
     } typedef BcastAlgorithm;
+	//Chain, ScatterAllgather, linear, bin_tree
 
     /* Estimate time for all bcasts */
 
@@ -164,6 +165,9 @@ public:
         CommInfo<IT> * info = new CommInfo<IT>();
 
         //JB: See https://www.sciencedirect.com/science/article/pii/S0743731522000697
+		//TODO: How to determine segsize and radix size
+		
+		//JB: will definitely need more precise nnz estimator, otherwise this becomes actively harmful
         switch(alg) {
 
             case BCAST_LINEAR:
@@ -175,8 +179,8 @@ public:
 
             case BCAST_CHAIN: //JB: Why would you ever use this one, binomial seems unambiguously superior?
             {
-                //Assume split into segments equal to the number of processors
-                size_t numSegs = bcastWorldSize;
+                //Assume split into segments equal to the number of processors/4
+                size_t numSegs = bcastWorldSize/4;
                 size_t segSize = msgSize / numSegs;
                 info->numMsgs = bcastWorldSize + (numSegs) - 2;
                 info->numBytes = segSize * info->numMsgs; 
@@ -236,13 +240,14 @@ public:
                 throw std::runtime_error("Bcast algorithm " + std::to_string(alg) + " not supported");
 		    }	
 
-#ifdef PROFILE
-            statPtr->Log("Bcast algorithm: " + std::to_string(alg));
-            statPtr->Log("Local nnz estimate: " + std::to_string(localNnzApprox));
-            statPtr->Log("Send bytes estimate: " + std::to_string(info->numBytes));
-            statPtr->Log("Num msgs estimate: " + std::to_string(info->numMsgs));
-#endif
         }
+
+#ifdef PROFILE
+		statPtr->Log("Bcast algorithm: " + std::to_string(alg));
+		statPtr->Log("Local nnz estimate: " + std::to_string(localNnzApprox));
+		statPtr->Log("Send bytes estimate: " + std::to_string(info->numBytes));
+		statPtr->Log("Num msgs estimate: " + std::to_string(info->numMsgs));
+#endif
         
         return info;
 
@@ -306,7 +311,15 @@ public:
 			} else {
 				alg = BCAST_LINEAR;
 			}
-		} else {
+		} else if (commSize < 32) { 
+			if (msgSize < 4096) {
+				alg = BCAST_KNOMIAL;
+			} else if (msgSize < 1048576) {
+				alg = BCAST_BINOMIAL;
+			} else {
+				alg = BCAST_SCATTER_ALLGATHER;
+			}
+        } else {
 			throw std::runtime_error("Larger comm sizes not supported yet");
 		}
 		
