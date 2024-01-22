@@ -114,7 +114,8 @@ public:
         BCAST_BIN_TREE, // Standard
         BCAST_BINOMIAL, // Split message and use binomial tree 
         BCAST_KNOMIAL, // ditto, but tree with radix k
-        BCAST_SCATTER_ALLGATHER // Reserved for large messages and communicator sizes
+        BCAST_SCATTER_ALLGATHER, // Reserved for large messages and communicator sizes
+        BCAST_NONE // Do nothing
     } typedef BcastAlgorithm;
 	//Chain, ScatterAllgather, linear, bin_tree
 
@@ -129,7 +130,8 @@ public:
         int gridSize = (nodes*ppn) / layers;
         
         CommOpts * opts = new CommOpts{
-            gridSize <= params.GetCoresPerNode() ? true : false //intranode
+            //gridSize <= params.GetCoresPerNode() ? true : false //intranode
+            false
         };
 
         CommInfo<IT> * info = MakeBcastCommInfoPost(Minfo, params);
@@ -160,7 +162,7 @@ public:
 
         int bcastWorldSize = static_cast<int>(sqrt( (this->nodes*this->ppn) / this->layers ));
 
-        BcastAlgorithm alg = SelectBcastAlg(msgSize, bcastWorldSize);
+        BcastAlgorithm alg = SelectBcastAlgSimple(msgSize, bcastWorldSize);
         
         CommInfo<IT> * info = new CommInfo<IT>();
 
@@ -180,7 +182,7 @@ public:
             case BCAST_CHAIN: //JB: Why would you ever use this one, binomial seems unambiguously superior?
             {
                 //Assume split into segments equal to the number of processors/4
-                size_t numSegs = bcastWorldSize/4;
+                size_t numSegs = bcastWorldSize;
                 size_t segSize = msgSize / numSegs;
                 info->numMsgs = bcastWorldSize + (numSegs) - 2;
                 info->numBytes = segSize * info->numMsgs; 
@@ -217,8 +219,8 @@ public:
                 size_t numSegs = bcastWorldSize;
                 size_t segSize = msgSize / numSegs;
 
-                //Assume radix=4 arbitrarily
-                size_t radix = 4;
+                //Assume radix=4 or bcastWorldSize arbitrarily
+                size_t radix = 4 > bcastWorldSize ? bcastWorldSize : 4;
 
                 info->numMsgs = (radix - 1) * static_cast<int>(log2(bcastWorldSize) / log2(radix) ); 
                 info->numBytes = segSize * info->numMsgs;
@@ -245,12 +247,28 @@ public:
 #ifdef PROFILE
 		statPtr->Log("Bcast algorithm: " + std::to_string(alg));
 		statPtr->Log("Local nnz estimate: " + std::to_string(localNnzApprox));
+		statPtr->Log("Msg size: " + std::to_string(msgSize));
 		statPtr->Log("Send bytes estimate: " + std::to_string(info->numBytes));
 		statPtr->Log("Num msgs estimate: " + std::to_string(info->numMsgs));
 #endif
         
         return info;
 
+    }
+
+    //TODO: This is scuffed. We need to see if it works for larger node counts/other matrices
+    template <typename IT>
+    BcastAlgorithm SelectBcastAlgSimple(IT msgSize, int commSize) {
+        if (msgSize==0 || commSize==0)
+            return BCAST_NONE;
+        BcastAlgorithm alg;
+        if (msgSize < 49000000)
+            alg=BCAST_BIN_TREE;
+        else if (msgSize < 190000000)
+            alg=BCAST_CHAIN;
+        else
+            alg=BCAST_KNOMIAL;
+        return alg;
     }
     
     //JB: See https://github.com/open-mpi/ompi/blob/f0261cbef73897133177f17351b80eee6111f1bf/ompi/mca/coll/tuned/coll_tuned_decision_fixed.c#L512
@@ -259,6 +277,11 @@ public:
     BcastAlgorithm SelectBcastAlg(IT msgSize, int commSize) {
         
         //JB: For now, only support decisions for up to communicator size of 16, just to see if this is a decent idea first
+
+        // Do nothing if no bcast
+        if (msgSize==0 || commSize==0)
+            return BCAST_NONE;
+
 		BcastAlgorithm alg;
         
 		if (commSize < 4) {
