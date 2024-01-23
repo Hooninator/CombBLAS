@@ -8,6 +8,7 @@
 #include "SymbolicSpParMat3D.h"
 #include "CommModel.h"
 #include "CompModel.h"
+#include "MergeModel.h"
 #include "PlatformParams.h"
 
 
@@ -351,7 +352,6 @@ public:
     }
 
 
-
     /* LOCAL SpGEMM MODELS */
     
     template <typename AIT, typename ANT, typename ADER, typename BIT, typename BNT, typename BDER>
@@ -402,7 +402,12 @@ public:
         return finalTime;
     }
 
-    double LayerMergeTime(){return 0;}
+    /* TODO: should probably just make BcastModel and SpGEMM Model class */
+
+    double LayerMergeTime() {
+        return 0;
+    }
+ 
     double AlltoAllTime(){return 0;}
     double MergeFiberTime(){return 0;}
 
