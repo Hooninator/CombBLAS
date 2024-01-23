@@ -8,7 +8,7 @@
 namespace combblas {
 namespace autotuning {
 
-struct MergeModelParams {
+struct MergeInfo {
 
     //TODO
 
@@ -17,8 +17,8 @@ struct MergeModelParams {
 class MergeModel {
 
 public:
-    virtual double ComputeTime(MergeModelParams * params) {
-        throw std::runtime_error("This should never be called");
+    virtual double ComputeTime(MergeInfo * info) {
+        INVALID_CALL_ERR();
     }
 
 };

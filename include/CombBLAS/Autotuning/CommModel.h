@@ -1,4 +1,6 @@
 
+
+
 #ifndef COMMMODEL_H
 #define COMMMODEL_H
 
@@ -30,9 +32,9 @@ class CommModel {
 public:
     CommModel(){}
 
-    virtual double ComputeTime(CommInfo<IT> * info, CommOpts * opts) {throw std::runtime_error("This method should never be called");}
+    virtual double ComputeTime(CommInfo<IT> * info, CommOpts * opts) {INVALID_CALL_ERR();}
 
-    virtual int GetWorld() {throw std::runtime_error("This method should never be called");}
+    virtual int GetWorld() {INVALID_CALL_ERR();}
 
 };
 
@@ -69,9 +71,7 @@ private:
 
 
 
-};
-};
+}
+}
 
 #endif
-
-

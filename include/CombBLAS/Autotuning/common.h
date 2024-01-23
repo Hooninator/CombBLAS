@@ -52,6 +52,8 @@
     } while (false)
 
 
+#define INVALID_CALL_ERR() throw std::runtime_error("This method should never be called");
+
 
 namespace combblas {
 namespace autotuning {
@@ -140,18 +142,11 @@ void Init(JobManager jm) {
     debugPtr = new Logger(rank,"logfile"+std::to_string(rank)+".out");
 #endif
 
-    upcxx::init();
+   // upcxx::init();
 
     initCalled = true;
 }
 
-
-std::string ExtractMatName(const std::string& path) {
-    size_t start = path.rfind('/') + 1; // +1 to start after '/'
-    size_t end = path.rfind('.');
-    std::string fileName = path.substr(start, end - start);
-    return fileName;
-}
 
 
 void Finalize() {
@@ -168,9 +163,29 @@ void Finalize() {
 
     delete jobPtr;
     
-    upcxx::finalize();
+ //   upcxx::finalize();
 
 }
+
+
+/* UTILITY FUNCTIONS */
+std::string ExtractMatName(const std::string& path) {
+    size_t start = path.rfind('/') + 1; // +1 to start after '/'
+    size_t end = path.rfind('.');
+    std::string fileName = path.substr(start, end - start);
+    return fileName;
+}
+
+
+
+static bool IsPerfectSquare(int num) {
+	int root = static_cast<int>(sqrt(num));
+	return root*root==num;
+}
+
+
+template <typename T, typename U>
+inline U RoundedSqrt(T n) {return static_cast<U>(sqrt(n));}
 
 
 }//autotuning
