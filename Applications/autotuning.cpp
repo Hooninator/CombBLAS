@@ -24,11 +24,11 @@ int main(int argc, char ** argv) {
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &n);
 
+    std::string matpath(argv[1]);
     
     autotuning::Init(autotuning::M_SLURM);
     autotuning::Autotuner tuner(autotuning::perlmutterParams);
     
-    std::string matname(argv[1]);
     
     
     std::shared_ptr<CommGrid> grid;
@@ -39,12 +39,13 @@ int main(int argc, char ** argv) {
     typedef SpDCCols<IT,UT> DER;
 
     SpParMat<IT,UT,DER> A(grid);
-    A.ParallelReadMM(matname, true, maximum<double>());
+    A.ParallelReadMM(matpath, true, maximum<double>());
     SpParMat<IT,UT,DER> B(A);
 
     
-    auto resultParams = tuner.TuneSpGEMM3D(A, B, autotuning::BRUTE_FORCE);
-    auto tunedGrid = resultParams.MakeGridFromParams();
+    auto resultParams = tuner.TuneSpGEMM3D(A, B, autotuning::BRUTE_FORCE, matpath);
+    
+    autotuning::Finalize();
 
     return 0;
 
