@@ -17,14 +17,22 @@ public:
     typedef NT nzType;
     typedef DER seqType;
 
+    typedef upcxx::dist_object<std::vector<IT>> distObj;
+
     enum SPLIT {COL_SPLIT, ROW_SPLIT} typedef SPLIT;
+
 
     SpGEMM3DMatrixInfo(SpParMat3D<IT,NT,DER>& M):
         nnz(M.getnnz()), ncols(M.getncol()), nrows(M.getnrow()),
-        locNnz(M.seqptr()->getnnz()){
+        locNnz(M.seqptr()->getnnz()), 
+        nnzArr(new distObj(std::vector<IT>(0))) {
+
         density = static_cast<float>(nnz) / static_cast<float>(ncols*nrows);
         split = M.isColSplit() ? COL_SPLIT : ROW_SPLIT;
 
+        //Synchronize to ensure all processes have activated the nnzArray dist_object
+        upcxx::barrier();
+        
     }
 
  /* SpGEMM3DMatrixInfo(IT nnz, IT cols, IT rows):
@@ -38,7 +46,7 @@ public:
      */
     IT ApproxLocalNnzDensity(const int totalProcs) {
 
-        IT localNcols = LocalNcols(totalProcs);
+        IT localNcols = LocalNcols(totalProcs); //TODO: These should not be member functions, just members
         IT localNrows = LocalNrows(totalProcs);
         IT localMatSize = localNcols * localNrows;
 
@@ -147,6 +155,8 @@ private:
     float density;
 
     SPLIT split;    
+
+    distObj * nnzArr;
 
 };
 

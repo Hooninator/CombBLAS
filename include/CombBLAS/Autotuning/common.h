@@ -142,7 +142,7 @@ void Init(JobManager jm) {
     debugPtr = new Logger(rank,"logfile"+std::to_string(rank)+".out");
 #endif
 
-   // upcxx::init();
+    upcxx::init();
 
     initCalled = true;
 }
@@ -163,7 +163,7 @@ void Finalize() {
 
     delete jobPtr;
     
- //   upcxx::finalize();
+    upcxx::finalize();
 
 }
 
