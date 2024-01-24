@@ -210,8 +210,16 @@ public:
 
     }
 
-    /* Tunable parameters */
 
+    inline int GetNodes() const {return nodes;}
+    inline int GetPPN() const {return ppn;}
+    inline int GetLayers() const {return layers;}
+    inline int GetTotalProcs() const {return totalProcs;}
+    inline int GetGridSize() const {return gridSize;}
+    inline int GetRowSize() const {return rowSize;}
+
+private:
+    /* Tunable parameters */
     int nodes;
     int ppn;
     int layers;

@@ -16,7 +16,7 @@
 #include <string>
 #include <algorithm>
 #include <numeric>
-//#include <upcxx/upcxx.hpp>
+#include <upcxx/upcxx.hpp>
 
 #include "CombBLAS/SpMat.h"
 #include "CombBLAS/SpTuples.h"
@@ -186,6 +186,9 @@ static bool IsPerfectSquare(int num) {
 
 template <typename T, typename U>
 inline U RoundedSqrt(T n) {return static_cast<U>(sqrt(n));}
+
+template <typename T=float>
+inline T FloatDiv(T a, T b) {return static_cast<T>(a) / static_cast<T>(b);}
 
 
 }//autotuning
