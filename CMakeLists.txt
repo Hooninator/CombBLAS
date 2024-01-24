@@ -17,6 +17,8 @@ else()
   target_compile_features(CombBLAS PUBLIC cxx_return_type_deduction)
 endif()
 
+target_compile_options(CombBLAS PRIVATE -Wno-deprecated-declarations)
+
 # set include directories
 target_include_directories(CombBLAS PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include> $<INSTALL_INTERFACE:include>)
 target_include_directories(CombBLAS PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/psort-1.0/include> $<INSTALL_INTERFACE:include>)
@@ -27,8 +29,8 @@ find_package(MPI REQUIRED)
 find_package(OpenMP)
 
 # UPCXX dependency
-find_package(UPCXX REQUIRED)
-target_link_libraries(CombBLAS PUBLIC UPCXX::upcxx)
+#find_package(UPCXX REQUIRED)
+#target_link_libraries(CombBLAS PUBLIC UPCXX::upcxx)
 
 if(TARGET MPI::MPI_CXX) # Use target if available (CMake >= 3.9)
   target_link_libraries(CombBLAS PUBLIC MPI::MPI_CXX)

@@ -16,7 +16,7 @@
 #include <string>
 #include <algorithm>
 #include <numeric>
-#include <upcxx/upcxx.hpp>
+//#include <upcxx/upcxx.hpp>
 
 #include "CombBLAS/SpMat.h"
 #include "CombBLAS/SpTuples.h"
