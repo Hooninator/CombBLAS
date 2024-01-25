@@ -17,28 +17,50 @@ public:
     typedef NT nzType;
     typedef DER seqType;
 
-    typedef upcxx::dist_object<std::vector<IT>> distObj;
+    typedef upcxx::dist_object<upcxx::global_ptr<IT>> distArr;
 
     enum SPLIT {COL_SPLIT, ROW_SPLIT} typedef SPLIT;
 
-
+    //NOTE: loc* are values for the actual 2D processor grid
     SpGEMM3DMatrixInfo(SpParMat3D<IT,NT,DER>& M):
         nnz(M.getnnz()), ncols(M.getncol()), nrows(M.getnrow()),
-        locNnz(M.seqptr()->getnnz()), 
-        nnzArr(new distObj(std::vector<IT>(0))) {
+        locNnz(M.seqptr()->getnnz()), locNcols(M.seqptr()->getncol()), locNrows(M.seqptr()->getnrow())
+     {
 
         density = static_cast<float>(nnz) / static_cast<float>(ncols*nrows);
         split = M.isColSplit() ? COL_SPLIT : ROW_SPLIT;
+
+#ifdef PROFILE
+        auto stime = MPI_Wtime();
+#endif
+
+        nnzArr = new distArr(InitNnzVec(M));
+
+#ifdef PROFILE
+        auto etime = MPI_Wtime();
+        statPtr->Log("nnzArr Init Time: " + std::to_string(etime - stime));
+        statPtr->Print("nnzArr Init Time: " + std::to_string(etime - stime));
+#endif
 
         //Synchronize to ensure all processes have activated the nnzArray dist_object
         upcxx::barrier();
         
     }
 
- /* SpGEMM3DMatrixInfo(IT nnz, IT cols, IT rows):
-    nnz(nnz), ncols(cols), nrows(rows) {
-        density = static_cast<float>(nnz) / static_cast<float>(ncols*nrows);
-    }*/
+
+    /* Initialize global pointer to local nnz array */
+    upcxx::global_ptr<IT> InitNnzVec(SpParMat3D<IT,NT,DER>& M) {
+
+        upcxx::global_ptr<IT> globNnzVec(upcxx::new_array<IT>(locNcols));
+        auto locNnzVec = globNnzVec.local();
+
+        for (auto colIter = M.seqptr()->begcol(); colIter != M.seqptr()->endcol(); colIter++) {
+            locNnzVec[colIter.colid()] = colIter.nnz(); 
+        }
+
+        return globNnzVec;
+
+    } 
 
 
     /* Approximate local nnz using matrix density
@@ -51,7 +73,7 @@ public:
         IT localMatSize = localNcols * localNrows;
 
         IT localNnzApprox = static_cast<IT>(density * localMatSize);
-        return localNnzApprox ;
+        return localNnzApprox;
     }
 
     
@@ -108,8 +130,18 @@ public:
         IT lastRow = firstRow + rows2D - 1;
 
 
-        /*  */
-
+        /* Fetch nnz counts for columns/rows mapped to this processor in the symbolic 3D grid  */
+        IT locNnz3D = 0;
+        // foreach column
+        for (const IT j=firstCol; j<=lastCol; j++) {
+            // foreach row block in this column
+            for (const IT i = firstRow; i<=lastRow; i+=locNrows) {
+                int targetRank = TargetRank(i,j, cols2D);
+                locNnz3D += FetchNnz(targetRank, i, j).wait(); //TODO: Can we use a callback + atomics instead?
+            }
+        }
+        
+        return locNnz3D;
         
     }
 
@@ -119,7 +151,27 @@ public:
     }
 
 
+    //which rank does the jth row block of column i live on?
+    int TargetRank(IT i, IT j, int cols2D) {
+        int procRow = i / locNrows;
+        int procCol = j / locNcols;
+        return procRow * cols2D + procCol; 
+    }
+
     
+    upcxx::future<IT> FetchNnz(int targetRank, int i, int j) {
+        
+
+        int locJ = j % locNcols;
+
+        return nnzArr->fetch(targetRank).then(
+            [locJ](upcxx::global_ptr<IT> nnzPtr) {
+                return upcxx::rget(nnzPtr+ locJ);
+            }
+        );
+
+
+    }
 
 
     IT ComputeMsgSize(const int locNnz) {
@@ -129,6 +181,7 @@ public:
     }
 
     
+    //NOTE: These compute local sizes for a hypothetical 2D grid
     inline IT LocalNcols(int totalProcs) const {return ncols / static_cast<IT>(sqrt(totalProcs));}
     inline IT LocalNrows(int totalProcs) const {return nrows / static_cast<IT>(sqrt(totalProcs));}
 
@@ -138,6 +191,10 @@ public:
     inline IT GetNnz() const {return nnz;}
     inline IT GetNcols() const {return ncols;}
     inline IT GetNrows() const {return nrows;}
+
+    inline IT GetLocNnz() const {return locNnz;}
+    inline IT GetLocNcols() const {return locNcols;}
+    inline IT GetLocNrows() const {return locNrows;}
 
     inline float GetDensity() const {return density;}
 
@@ -151,12 +208,14 @@ private:
     IT nrows;
 
     IT locNnz;
+    IT locNcols;
+    IT locNrows;
 
     float density;
 
     SPLIT split;    
 
-    distObj * nnzArr;
+    distArr * nnzArr;
 
 };
 
