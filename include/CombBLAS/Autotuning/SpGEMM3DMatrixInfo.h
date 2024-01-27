@@ -129,18 +129,28 @@ public:
         IT firstRow = gridColRank * rows2D; 
         IT lastRow = firstRow + rows2D - 1;
 
+#ifdef DEBUG
+        debugPtr->Log("Rows 3D: " + rows3D);
+        debugPtr->Log("Last row: " + lastRow);
+        debugPtr->Log("Cols 3D: " + cols3D);
+        debugPtr->Log("Last row: " + lastCol);
+#endif
 
         /* Fetch nnz counts for columns/rows mapped to this processor in the symbolic 3D grid  */
         IT locNnz3D = 0;
         // foreach column
-        for (const IT j=firstCol; j<=lastCol; j++) {
+        for (IT j=firstCol; j<=lastCol; j++) {
             // foreach row block in this column
-            for (const IT i = firstRow; i<=lastRow; i+=locNrows) {
+            for (IT i = firstRow; i<=lastRow; i+=locNrows) {
                 int targetRank = TargetRank(i,j, cols2D);
                 locNnz3D += FetchNnz(targetRank, i, j).wait(); //TODO: Can we use a callback + atomics instead?
             }
         }
-        
+
+#ifdef DEBUG
+        debugPtr->Log("Nnz 3d: " + locNnz3D);
+#endif
+
         return locNnz3D;
         
     }
@@ -148,6 +158,7 @@ public:
 
     IT ComputeLocalNnzRowSplit(const int ppn, const int nodes, const int layers) {
         //TODO
+        return 0;
     }
 
 
@@ -161,7 +172,6 @@ public:
     
     upcxx::future<IT> FetchNnz(int targetRank, int i, int j) {
         
-
         int locJ = j % locNcols;
 
         return nnzArr->fetch(targetRank).then(
@@ -169,7 +179,6 @@ public:
                 return upcxx::rget(nnzPtr+ locJ);
             }
         );
-
 
     }
 

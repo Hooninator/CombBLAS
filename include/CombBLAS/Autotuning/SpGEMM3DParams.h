@@ -1,42 +1,23 @@
 
+
+
 #ifndef SPGEMM3DPARAMS_H
 #define SPGEMM3DPARAMS_H
 
-
 #include "common.h"
-#include "SpGEMM3DMatrixInfo.h"
-#include "SymbolicSpParMat3D.h"
-#include "CommModel.h"
-#include "BcastInfo.h"
-#include "LocalSpGEMMModel.h"
-#include "MergeModel.h"
 #include "PlatformParams.h"
 
 
-namespace combblas {
-namespace autotuning {
+namespace combblas{
 
+namespace autotuning{
 
-template <typename AIT, typename ANT, typename ADER, typename BIT, typename BNT, typename BDER>
-class SpGEMM3DInputs {
-
-public:
-
-    SpGEMM3DInputs<AIT,ANT,ADER,BIT,BNT,BDER>(SpGEMM3DMatrixInfo<AIT,ANT,ADER>& Ainfo,
-                                                SpGEMM3DMatrixInfo<BIT,BNT,BDER>& Binfo):
-    Ainfo(Ainfo), Binfo(Binfo) {}
-
-    SpGEMM3DMatrixInfo<AIT,ANT,ADER>& Ainfo;
-    SpGEMM3DMatrixInfo<BIT,BNT,BDER>& Binfo;
-};
-
-
-/* Output of tune routine. Relevant SpGEMM3D params that should be used to create a CommGrid3D 
- * Also defines runtime estimation model. TODO: Move that functionality to a dedicated model class
- */
 class SpGEMM3DParams {
+    
 public:
 
+
+	
     SpGEMM3DParams(){}
 
 
@@ -61,6 +42,7 @@ public:
     }
 
 
+    //TODO: Probably some smart way to make this more generic
     static std::vector<SpGEMM3DParams> ConstructSearchSpace(PlatformParams& params) {
         std::vector<SpGEMM3DParams> result;
         for (int _nodes = 1; _nodes<=jobPtr->nodes; _nodes*=2) {
@@ -76,103 +58,6 @@ public:
         }
         return result;
     }
-
-
-    /* Get runtime estimate of a certain combo of parameters */
-    template <typename AIT, typename ANT, typename ADER, typename BIT, typename BNT, typename BDER>
-    double EstimateRuntime(SpGEMM3DInputs<AIT,ANT,ADER, BIT, BNT, BDER>& inputs, PlatformParams& platformParams) {
-
-#ifdef DEBUG
-        debugPtr->Log(OutStr());
-#endif
-
-        auto Ainfo = inputs.Ainfo;
-        auto Binfo = inputs.Binfo;
-
-        CommModel<AIT> *bcastModel = new PostCommModel<AIT>(platformParams.GetInternodeAlpha(),
-                                                    platformParams.GetInternodeBeta(),
-                                                     platformParams.GetIntranodeBeta());
-        double bcastATime = BcastTime(bcastModel, Ainfo, platformParams);
-        double bcastBTime = BcastTime(bcastModel, Binfo, platformParams);
-        
-        LocalSpGEMMModel * localMultModel = new RegressionLocalSpGEMMModel(autotuning::regSpGEMMPerlmutter);
-        double localMultTime = LocalMultTime(localMultModel, Ainfo, Binfo);
-
-#ifdef PROFILE
-        statPtr->Log("BcastA time " + std::to_string(bcastATime/1e6) + "s");
-        statPtr->Log("BcastB time " + std::to_string(bcastBTime/1e6) + "s");
-        statPtr->Log("LocalMult time " + std::to_string(localMultTime/1e6) + "s");
-#endif
-        delete bcastModel;
-        delete localMultModel;
-
-        return 0;
-    }
-
-
-    /* BROADCAST */
-
-    template <typename IT, typename NT, typename DER>
-    double BcastTime(CommModel<IT> * bcastModel, SpGEMM3DMatrixInfo<IT,NT,DER>& Minfo, PlatformParams &params) {
-#ifdef PROFILE
-        auto stime1 = MPI_Wtime();
-#endif
-        
-        CommOpts * opts = new CommOpts{
-            //gridSize <= params.GetCoresPerNode() ? true : false //intranode
-            false
-        };
-        CommInfo<IT> * info = MakeBcastCommInfo<SpGEMM3DMatrixInfo<IT,NT,DER>, IT>(Minfo, rowSize, totalProcs);
-
-        double singleBcastTime = bcastModel->ComputeTime(info, opts);
-        double finalTime = singleBcastTime * sqrt(gridSize);
-
-        delete info;
-        delete opts;
-        
-#ifdef PROFILE
-        auto etime1 = MPI_Wtime();
-        auto t1 = (etime1-stime1);
-        statPtr->Log("Bcast calc time " + std::to_string(t1) + "s");
-#endif
-
-        return finalTime;
-    }
-
-
-    /* LOCAL SpGEMM */
-    
-    template <typename AIT, typename ANT, typename ADER, typename BIT, typename BNT, typename BDER>
-    double LocalMultTime(LocalSpGEMMModel * model, 
-                            SpGEMM3DMatrixInfo<AIT,ANT,ADER>& Ainfo,
-                            SpGEMM3DMatrixInfo<BIT,BNT,BDER>& Binfo) {
-#ifdef PROFILE
-        auto stime1 = MPI_Wtime();
-#endif
-        
-        long long localFLOPS = model->ApproxLocalMultFLOPSDensity(Ainfo, Binfo, totalProcs, gridSize);
-        LocalSpGEMMInfo * info = new LocalSpGEMMInfo { localFLOPS };
-
-        double finalTime = model->ComputeTime(info);
-
-        delete info;
-
-#ifdef PROFILE
-        auto etime1 = MPI_Wtime();
-        auto t1 = (etime1-stime1);
-        statPtr->Log("LocalMult calc time " + std::to_string(t1) + "s");
-#endif
-
-        return finalTime;
-    }
-
-
-    double LayerMergeTime() {
-        return 0;
-    }
- 
-    double AlltoAllTime(){return 0;}
-    double MergeFiberTime(){return 0;}
 
 
     /* Given a set of parameters, construct a 3D processor grid from a communicator that only contains the processes
@@ -210,7 +95,6 @@ public:
 
     }
 
-
     inline int GetNodes() const {return nodes;}
     inline int GetPPN() const {return ppn;}
     inline int GetLayers() const {return layers;}
@@ -223,21 +107,23 @@ private:
     int nodes;
     int ppn;
     int layers;
+
+    /* Other handy info */
     int totalProcs;
     int gridSize;
     int rowSize;
 
 
-};//SpGEMM3DParams
 
+};
 
 
 }//autotuning
 }//combblas
 
+
+
+
+
 #endif
-
-
-
-
 

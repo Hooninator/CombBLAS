@@ -6,6 +6,7 @@
 
 #include "common.h"
 #include "SpGEMM3DMatrixInfo.h"
+#include "SpGEMM3DParams.h"
 #include "PlatformParams.h"
 #include "CommModel.h"
 
@@ -119,11 +120,8 @@ BcastAlgorithm SelectBcastAlg(IT msgSize, int commSize) {
 }
 
 
-template <typename M, typename IT>
-CommInfo<IT> * MakeBcastCommInfo(M& Minfo, const int bcastWorldSize, const int totalProcs) {
-
-	IT localNnzApprox = Minfo.ApproxLocalNnzDensity(totalProcs);
-    IT msgSize = Minfo.ComputeMsgSize(localNnzApprox);
+template <typename IT>
+CommInfo<IT> * MakeBcastCommInfo(const int bcastWorldSize, const int totalProcs, const IT msgSize) {
 
 	BcastAlgorithm alg = SelectBcastAlgSimple(msgSize, bcastWorldSize);
 
@@ -209,7 +207,6 @@ CommInfo<IT> * MakeBcastCommInfo(M& Minfo, const int bcastWorldSize, const int t
 
 #ifdef PROFILE
 	statPtr->Log("Bcast algorithm: " + std::to_string(alg));
-	statPtr->Log("Local nnz estimate: " + std::to_string(localNnzApprox));
 	statPtr->Log("Msg size: " + std::to_string(msgSize));
 	statPtr->Log("Send bytes estimate: " + std::to_string(info->numBytes));
 	statPtr->Log("Num msgs estimate: " + std::to_string(info->numMsgs));

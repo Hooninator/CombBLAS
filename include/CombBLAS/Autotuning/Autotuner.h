@@ -4,6 +4,7 @@
 
 
 #include "common.h"
+#include "SpGEMM3DModel.h"
 #include "SpGEMM3DParams.h"
 #include "PlatformParams.h"
 
@@ -63,7 +64,7 @@ public:
         switch(method) {
             case BRUTE_FORCE:
             {
-                resultParams = SearchBruteForce<SpGEMM3DParams>(inputs); 
+                resultParams = SearchBruteForce<SpGEMM3DParams, SpGEMM3DModel>(inputs); 
                 break;
             }
             default:
@@ -82,7 +83,7 @@ public:
     SpGEMM3DParams TuneSpGEMM3DGPU() {/*TODO*/}
 
     
-    template <typename P, typename I>
+    template <typename P, typename M, typename I>
     P SearchBruteForce(I input) {
 
 #ifdef PROFILE
@@ -97,21 +98,27 @@ public:
 #endif
 
         P bestParams;  
+        M model(platformParams);
+
         double bestTime = std::numeric_limits<double>::max(); 
 
         for (P currParams : searchSpace) {
+
 #ifdef PROFILE
             statPtr->Log(currParams.OutStr());
 #endif
-            double currTime = currParams.EstimateRuntime(input, platformParams);
+
+            double currTime = model.EstimateRuntime(input, currParams);
             if (currTime<=bestTime) {
                 bestTime = currTime;
                 bestParams = currParams;
             }
+
 #ifdef PROFILE
             statPtr->Log("Total runtime " + std::to_string(currTime)+"s");
             statPtr->Log("\n");
 #endif
+
         }
 
 #ifdef PROFILE
