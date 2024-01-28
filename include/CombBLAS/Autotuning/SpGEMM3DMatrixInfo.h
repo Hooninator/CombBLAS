@@ -154,9 +154,6 @@ public:
             for (IT i = firstRow; i<lastRow; i+=locNrows) {
                 int targetRank = TargetRank(i,j, procCols2D);
                 locNnz3D += FetchNnz(targetRank, i, j).wait(); //TODO: Can we use a callback + atomics instead?
-#ifdef DEBUG
-                //debugPtr->Log("Target Rank: " + std::to_string(targetRank));
-#endif
             }
         }
 
@@ -178,17 +175,8 @@ public:
     //which rank does the jth row block of column i live on?
     //TODO: This fails when the rows/columns are not evenly distributed across the 2D grid
     int TargetRank(IT i, IT j, int procCols2D) {
-
         int procRow = i / locNrows;
         int procCol = j / locNcols;
-#ifdef DEBUG
-        /*
-        debugPtr->Log("I: " + std::to_string(i));
-        debugPtr->Log("J: " + std::to_string(j));
-        debugPtr->Log("procRow: " + std::to_string(procRow));
-        debugPtr->Log("procCol: " + std::to_string(procCol));
-        */
-#endif
         return procRow * procCols2D + procCol; 
     }
 
