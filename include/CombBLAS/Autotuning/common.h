@@ -141,7 +141,7 @@ void Init(JobManager jm) {
     jobPtr = new JobInfo(jm);
 
 #ifdef DEBUG
-    debugPtr = new Logger(rank,"logfile"+std::to_string(rank)+".out");
+    debugPtr = new Logger(rank,"logfile"+std::to_string(rank)+".out", true);
 #endif
 
 

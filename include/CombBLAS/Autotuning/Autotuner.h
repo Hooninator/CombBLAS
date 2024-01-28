@@ -48,7 +48,7 @@ public:
 
 #ifdef PROFILE
         std::string matname = ExtractMatName(matpath);
-        statPtr = new Logger(rank, "statfile-N"+std::to_string(jobPtr->nodes)+"-"+matname+".out");
+        statPtr = new Logger(rank, "statfile-N"+std::to_string(jobPtr->nodes)+"-"+matname+".out", false);
 #endif
         
         SpParMat3D<AIT, ANT, ADER> A3D(A, 1, true, false);
