@@ -129,6 +129,8 @@ void Init(JobManager jm) {
     MPI_Initialized(&initialized);
     ASSERT(initialized==1, "Please call MPI_Init() before calling this function");
 
+    upcxx::init();
+
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &worldSize);
 
@@ -142,7 +144,6 @@ void Init(JobManager jm) {
     debugPtr = new Logger(rank,"logfile"+std::to_string(rank)+".out");
 #endif
 
-    upcxx::init();
 
     initCalled = true;
 }

@@ -44,6 +44,7 @@ public:
 
         //Synchronize to ensure all processes have activated the nnzArray dist_object
         upcxx::barrier();
+        MPI_Barrier(MPI_COMM_WORLD);
         
     }
 
@@ -103,11 +104,13 @@ public:
 
     IT ComputeLocalNnzColSplit(const int ppn, const int nodes, const int layers) {
 
-        IT locNnz = 0;
+        const int totalProcs = ppn*nodes*layers;
+        if (totalProcs==1) return locNnz;
 
-        const int totalProcs = ppn*nodes;
-        const int cols2D = RoundedSqrt<int,int>(totalProcs);
-        const int rows2D = cols2D;
+        /* Info about currently, actually formed 2D processor grid */
+        const int totalProcs2D = jobPtr->totalTasks;
+        const int procCols2D = RoundedSqrt<int,int>(totalProcs2D);
+        const int procRows2D = procCols2D;
 
         const int gridSize = totalProcs / layers;
         const int gridRows = RoundedSqrt<int,int>(gridSize);
@@ -119,21 +122,23 @@ public:
         const int fiberRank = rank / gridSize;
         
         /* Compute columns per processor in 3d grid */
-        IT cols3D = ncols / (gridCols * layers); 
-        IT firstCol = LocalNcols(totalProcs) * (cols2D/gridCols) * gridRowRank +
-                        cols3D * fiberRank; 
-        IT lastCol = firstCol + cols3D - 1;
+        IT locNcols3D = ncols / (gridCols * layers); 
+        IT firstCol = LocalNcols(totalProcs) * (procCols2D/gridCols) * gridRowRank +
+                        locNcols3D * fiberRank; 
+        IT lastCol = firstCol + locNcols3D - 1;
 
         /* Compute rows per processor in 3d grid */
-        IT rows3D = rows2D * (LocalNrows(totalProcs) / gridRows);
-        IT firstRow = gridColRank * rows2D; 
-        IT lastRow = firstRow + rows2D - 1;
+        IT locNrows3D = nrows / gridRows;
+        IT firstRow = gridColRank * locNrows3D; 
+        IT lastRow = firstRow + locNrows3D - 1;
 
 #ifdef DEBUG
-        debugPtr->Log("Rows 3D: " + rows3D);
-        debugPtr->Log("Last row: " + lastRow);
-        debugPtr->Log("Cols 3D: " + cols3D);
-        debugPtr->Log("Last row: " + lastCol);
+        debugPtr->Log("2D Nnz: " + std::to_string(locNnz), true);
+        debugPtr->Log("(Total procs, grid size): " + std::to_string(totalProcs) + ", " + std::to_string(gridSize), true);
+        debugPtr->Log("Rows 3D: " + std::to_string(locNrows3D), true);
+        debugPtr->Log("Last row: " + std::to_string(lastRow), true);
+        debugPtr->Log("Cols 3D: " + std::to_string(locNcols3D), true);
+        debugPtr->Log("Last col: " + std::to_string(lastCol), true);
 #endif
 
         /* Fetch nnz counts for columns/rows mapped to this processor in the symbolic 3D grid  */
@@ -142,13 +147,16 @@ public:
         for (IT j=firstCol; j<=lastCol; j++) {
             // foreach row block in this column
             for (IT i = firstRow; i<=lastRow; i+=locNrows) {
-                int targetRank = TargetRank(i,j, cols2D);
-                locNnz3D += FetchNnz(targetRank, i, j).wait(); //TODO: Can we use a callback + atomics instead?
+                int targetRank = TargetRank(i,j, procCols2D);
+                //locNnz3D += FetchNnz(targetRank, i, j).wait(); //TODO: Can we use a callback + atomics instead?
+#ifdef DEBUG
+                debugPtr->Log("Target Rank: " + std::to_string(targetRank), true);
+#endif
             }
         }
 
 #ifdef DEBUG
-        debugPtr->Log("Nnz 3d: " + locNnz3D);
+        debugPtr->Log("Nnz 3d: " + std::to_string(locNnz3D), true);
 #endif
 
         return locNnz3D;
@@ -163,10 +171,10 @@ public:
 
 
     //which rank does the jth row block of column i live on?
-    int TargetRank(IT i, IT j, int cols2D) {
+    int TargetRank(IT i, IT j, int procCols2D) {
         int procRow = i / locNrows;
         int procCol = j / locNcols;
-        return procRow * cols2D + procCol; 
+        return procRow * procCols2D + procCol; 
     }
 
     
@@ -208,6 +216,7 @@ public:
     inline float GetDensity() const {return density;}
 
     inline SPLIT GetSplit() const {return split;}
+
 
 private:
 
