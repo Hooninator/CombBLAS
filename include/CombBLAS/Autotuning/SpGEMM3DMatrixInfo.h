@@ -164,16 +164,19 @@ public:
         const int fiberRank = rank / gridSize;
         
         /* Compute columns per processor in 3d grid */
-        IT locNcols3D = ncols / (gridCols * layers); 
+        IT locNcols3D;
+        locNcols3D = locNcols * (procCols2D/gridCols); 
+        if (layers!=1) locNcols3D = locNcols3D / layers;
+
         IT firstCol = locNcols * (procCols2D/gridCols) * gridRowRank +
                         locNcols3D * fiberRank; 
         IT lastCol = firstCol + locNcols3D;
 
         /* Compute rows per processor in 3d grid */
-        IT locNrows3D = nrows / gridRows;
+        IT locNrows3D = locNrows * (procRows2D/gridRows);
         IT firstRow = gridColRank * locNrows3D; 
         IT lastRow = firstRow + locNrows3D;
-        if (gridSize==1) lastRow = (nrows / layers) * layers;
+        //if (gridSize==1) lastRow = (nrows / layers) * layers;
 
         /* Row block offset */
         IT rowOffset = locNrows;
@@ -181,27 +184,61 @@ public:
         /* Fetch nnz counts for columns/rows mapped to this processor in the symbolic 3D grid  */
         IT locNnz3D = 0;
 
+        DEBUG_LOG("Rows 3D: " + std::to_string(locNrows3D));
+        DEBUG_LOG("Cols 3D: " + std::to_string(locNcols3D));
+        DEBUG_LOG("First col: " + std::to_string(firstCol));
+        DEBUG_LOG("Last col: " + std::to_string(lastCol));
+        DEBUG_LOG("First row: " + std::to_string(firstRow));
+        DEBUG_LOG("Last row: " + std::to_string(lastRow));
+        DEBUG_LOG("Local rows: " + std::to_string(locNrows));
+        DEBUG_LOG("Local cols: " + std::to_string(locNcols));
+        DEBUG_LOG("Local rows exact: " + std::to_string(locNrowsExact));
+        DEBUG_LOG("Local cols exact: " + std::to_string(locNcolsExact));
+
         //TODO: Parallelize this loop with openMP
         // foreach column
+#ifdef DEBUG
+        std::map<int,int> targets;
+#endif
         IT lrow; IT lcol;
         for (IT j=firstCol; j<lastCol; j++) {
             // foreach row block in this column
             for (IT i = firstRow; i<lastRow; i+=rowOffset) {
                 int targetRank = TargetRank(i,j, procCols2D);
+#ifdef DEBUG
+                targets.emplace(targetRank, 0);
+                targets[targetRank] += 1;
+#endif
                 locNnz3D += FetchNnz(targetRank, j, locNcols, this->nnzArrCol).wait(); //TODO: Can we use a callback + atomics instead?
             }
+
+            //handle leftover rows
+            //if (lastRow==(nrows / procRows2D) * procRows2D) {
+              //  for (IT i=lastRow; i<nrows; i++) {
+
         }
 
         // Handle leftover columns
         if (lastCol == (ncols / procCols2D)*procCols2D) {
+            DEBUG_LOG("Doing edge case...");
             for (IT j=lastCol; j<ncols; j++) {
                 for (IT i = firstRow; i<lastRow; i+=rowOffset) {
                     int targetRank = TargetRank(i,j, procCols2D);
+#ifdef DEBUG
+                    targets.emplace(targetRank, 0);
+                    targets[targetRank] += 1;
+#endif
                     locNnz3D += FetchNnz(targetRank, j, locNcols, this->nnzArrCol).wait(); //TODO: Can we use a callback + atomics instead?
                 }
             }
         }
 
+#ifdef DEBUG
+        DEBUG_LOG("Targets....")
+        for (auto pair=targets.begin(); pair!=targets.end(); pair++) {
+            DEBUG_LOG("Rank " + std::to_string(pair->first) + ": " + std::to_string(pair->second));
+        }
+#endif
 
         DEBUG_LOG("Nnz 3d A: " + std::to_string(locNnz3D));
 
@@ -232,12 +269,15 @@ public:
         const int gridColRank = gridRank / gridRows; // rank in processor column of grid
         const int fiberRank = rank / gridSize;
 
-        IT locNcols3D = ncols / gridCols; 
+        IT locNcols3D = locNcols * (procCols2D/gridCols); 
         IT firstCol = gridRowRank * locNcols3D;
         IT lastCol = firstCol + locNcols3D;
-        if (gridSize==1) lastCol = (ncols / layers) * layers;
+        //if (gridSize==1) lastCol = (ncols / layers) * layers;
 
-        IT locNrows3D = nrows / (gridCols * layers);
+        IT locNrows3D; 
+        locNrows3D = locNrows * (procRows2D/gridRows);
+        if (layers!=1) locNrows3D /= layers;
+
         IT firstRow = gridColRank * (procRows2D / gridRows) * locNrows +
                         locNrows3D * fiberRank;
         IT lastRow = firstRow + locNrows3D;
@@ -257,12 +297,20 @@ public:
 
         IT locNnz3D = 0;
 
+#ifdef DEBUG
+        std::map<int,int> targets;
+#endif
+
         //TODO: Message aggregation
         //TODO: Should probably avoid fetching rows with no nonzeros
         IT lrow; IT lcol;
         for (IT i = firstRow; i<lastRow; i++) {
             for (IT j = firstCol; j<lastCol; j+=colOffset) {
                 int targetRank = TargetRank(i,j, procCols2D);
+#ifdef DEBUG
+                targets.emplace(targetRank, 0);
+                targets[targetRank] += 1;
+#endif
                 locNnz3D += FetchNnz(targetRank, i, locNrows, this->nnzArrRow).wait();
             }
         }
@@ -272,10 +320,22 @@ public:
             for (IT i = lastRow; i<nrows; i++) {
                 for (IT j = firstCol; j<lastCol; j+=colOffset) {
                     int targetRank = TargetRank(i,j, procCols2D);
+#ifdef DEBUG
+                    targets.emplace(targetRank, 0);
+                    targets[targetRank] += 1;
+#endif
                     locNnz3D += FetchNnz(targetRank, i, locNrows, this->nnzArrRow).wait();
                 }
             }
         }
+
+
+#ifdef DEBUG
+        DEBUG_LOG("Targets....")
+        for (auto pair=targets.begin(); pair!=targets.end(); pair++) {
+            DEBUG_LOG("Rank " + std::to_string(pair->first) + ": " + std::to_string(pair->second));
+        }
+#endif
 
         DEBUG_LOG("Nnz 3d B: " + std::to_string(locNnz3D));
 
