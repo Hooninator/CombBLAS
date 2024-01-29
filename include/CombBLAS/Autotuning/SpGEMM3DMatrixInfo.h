@@ -177,11 +177,21 @@ public:
 
         /* Fetch nnz counts for columns/rows mapped to this processor in the symbolic 3D grid  */
         IT locNnz3D = 0;
-        // foreach column
+
         //TODO: Parallelize this loop with openMP
+        // foreach column
         IT lrow; IT lcol;
         for (IT j=firstCol; j<lastCol; j++) {
             // foreach row block in this column
+            for (IT i = firstRow; i<lastRow; i+=rowOffset) {
+                if (i >= lastRow) break;
+                int targetRank = TargetRank(i,j, procCols2D);
+                locNnz3D += FetchNnz(targetRank, j, locNcols, this->nnzArrCol).wait(); //TODO: Can we use a callback + atomics instead?
+            }
+        }
+
+        // Handle leftover columns
+        for (IT j=(ncols / locNcols3D) * locNcols3D; j<ncols; j++) {
             for (IT i = firstRow; i<lastRow; i+=rowOffset) {
                 if (i >= lastRow) break;
                 int targetRank = TargetRank(i,j, procCols2D);
@@ -244,7 +254,6 @@ public:
 
         // Activate the juice
         
-        std::unordered_map<int,int> targets;
         //TODO: Message aggregation
         //TODO: Should probably avoid fetching rows with no nonzeros
         IT lrow; IT lcol;
@@ -252,15 +261,17 @@ public:
             for (IT j = firstCol; j<lastCol; j+=colOffset) {
                 if (j >= lastCol) break; //hack for not evenly dividing cols
                 int targetRank = TargetRank(i,j, procCols2D);
-                targets.insert({targetRank,0});
                 locNnz3D += FetchNnz(targetRank, i, locNrows, this->nnzArrRow).wait();
             }
         }
 
-
-        DEBUG_LOG("Targets for rank " + std::to_string(rank));
-        for (auto targetIter=targets.begin(); targetIter!=targets.end(); targetIter++) {
-            DEBUG_LOG(std::to_string(targetIter->first));
+        // Handle leftovers
+        for (IT i = (nrows / locNrows3D) * locNrows3D; i<nrows; i++) {
+            for (IT j = firstCol; j<lastCol; j+=colOffset) {
+                if (j >= lastCol) break; //hack for not evenly dividing cols
+                int targetRank = TargetRank(i,j, procCols2D);
+                locNnz3D += FetchNnz(targetRank, i, locNrows, this->nnzArrRow).wait();
+            }
         }
 
         DEBUG_LOG("Nnz 3d B: " + std::to_string(locNnz3D));
