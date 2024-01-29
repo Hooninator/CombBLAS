@@ -26,7 +26,9 @@ public:
         nnz(M.getnnz()), ncols(M.getncol()), nrows(M.getnrow()),
         locNnz(M.seqptr()->getnnz()), 
         locNcols(M.getncol() / RoundedSqrt<IT,IT>(jobPtr->totalTasks)), 
-        locNrows(M.getnrow() / RoundedSqrt<IT,IT>(jobPtr->totalTasks))
+        locNrows(M.getnrow() / RoundedSqrt<IT,IT>(jobPtr->totalTasks)),
+        locNcolsExact(M.seqptr()->getncol()),
+        locNrowsExact(M.seqptr()->getnrow())
      {
         
         INIT_TIMER();
@@ -58,7 +60,7 @@ public:
     //TODO: Move this to SpParMat constructor
     upcxx::global_ptr<IT> InitNnzArrCol(SpParMat3D<IT,NT,DER>& M) {
 
-        upcxx::global_ptr<IT> globNnzVec(upcxx::new_array<IT>(locNcols));
+        upcxx::global_ptr<IT> globNnzVec(upcxx::new_array<IT>(locNcolsExact));
         auto locNnzVec = globNnzVec.local();
 
         //TODO: Use multithreaded versions of this
@@ -73,7 +75,7 @@ public:
     
     upcxx::global_ptr<IT> InitNnzArrRow(SpParMat3D<IT,NT,DER>& M) {
         
-        upcxx::global_ptr<IT> globNnzVec(upcxx::new_array<IT>(locNrows));
+        upcxx::global_ptr<IT> globNnzVec(upcxx::new_array<IT>(locNrowsExact));
         auto locNnzVec = globNnzVec.local();
 
         //JB: This is terrible
@@ -171,6 +173,7 @@ public:
         IT locNrows3D = nrows / gridRows;
         IT firstRow = gridColRank * locNrows3D; 
         IT lastRow = firstRow + locNrows3D;
+        if (gridSize==1) lastRow = (nrows / layers) * layers;
 
         /* Row block offset */
         IT rowOffset = locNrows;
@@ -184,18 +187,18 @@ public:
         for (IT j=firstCol; j<lastCol; j++) {
             // foreach row block in this column
             for (IT i = firstRow; i<lastRow; i+=rowOffset) {
-                if (i >= lastRow) break;
                 int targetRank = TargetRank(i,j, procCols2D);
                 locNnz3D += FetchNnz(targetRank, j, locNcols, this->nnzArrCol).wait(); //TODO: Can we use a callback + atomics instead?
             }
         }
 
         // Handle leftover columns
-        for (IT j=(ncols / locNcols3D) * locNcols3D; j<ncols; j++) {
-            for (IT i = firstRow; i<lastRow; i+=rowOffset) {
-                if (i >= lastRow) break;
-                int targetRank = TargetRank(i,j, procCols2D);
-                locNnz3D += FetchNnz(targetRank, j, locNcols, this->nnzArrCol).wait(); //TODO: Can we use a callback + atomics instead?
+        if (lastCol == (ncols / procCols2D)*procCols2D) {
+            for (IT j=lastCol; j<ncols; j++) {
+                for (IT i = firstRow; i<lastRow; i+=rowOffset) {
+                    int targetRank = TargetRank(i,j, procCols2D);
+                    locNnz3D += FetchNnz(targetRank, j, locNcols, this->nnzArrCol).wait(); //TODO: Can we use a callback + atomics instead?
+                }
             }
         }
 
@@ -229,10 +232,10 @@ public:
         const int gridColRank = gridRank / gridRows; // rank in processor column of grid
         const int fiberRank = rank / gridSize;
 
-        
         IT locNcols3D = ncols / gridCols; 
         IT firstCol = gridRowRank * locNcols3D;
         IT lastCol = firstCol + locNcols3D;
+        if (gridSize==1) lastCol = (ncols / layers) * layers;
 
         IT locNrows3D = nrows / (gridCols * layers);
         IT firstRow = gridColRank * (procRows2D / gridRows) * locNrows +
@@ -249,28 +252,28 @@ public:
         DEBUG_LOG("Last row: " + std::to_string(lastRow));
         DEBUG_LOG("Local rows: " + std::to_string(locNrows));
         DEBUG_LOG("Local cols: " + std::to_string(locNcols));
+        DEBUG_LOG("Local rows exact: " + std::to_string(locNrowsExact));
+        DEBUG_LOG("Local cols exact: " + std::to_string(locNcolsExact));
 
         IT locNnz3D = 0;
 
-        // Activate the juice
-        
         //TODO: Message aggregation
         //TODO: Should probably avoid fetching rows with no nonzeros
         IT lrow; IT lcol;
         for (IT i = firstRow; i<lastRow; i++) {
             for (IT j = firstCol; j<lastCol; j+=colOffset) {
-                if (j >= lastCol) break; //hack for not evenly dividing cols
                 int targetRank = TargetRank(i,j, procCols2D);
                 locNnz3D += FetchNnz(targetRank, i, locNrows, this->nnzArrRow).wait();
             }
         }
 
         // Handle leftovers
-        for (IT i = (nrows / locNrows3D) * locNrows3D; i<nrows; i++) {
-            for (IT j = firstCol; j<lastCol; j+=colOffset) {
-                if (j >= lastCol) break; //hack for not evenly dividing cols
-                int targetRank = TargetRank(i,j, procCols2D);
-                locNnz3D += FetchNnz(targetRank, i, locNrows, this->nnzArrRow).wait();
+        if (lastRow == (nrows / procRows2D)*procRows2D) {
+            for (IT i = lastRow; i<nrows; i++) {
+                for (IT j = firstCol; j<lastCol; j+=colOffset) {
+                    int targetRank = TargetRank(i,j, procCols2D);
+                    locNnz3D += FetchNnz(targetRank, i, locNrows, this->nnzArrRow).wait();
+                }
             }
         }
 
@@ -364,6 +367,8 @@ private:
     IT locNnz;
     IT locNcols;
     IT locNrows;
+    IT locNcolsExact;
+    IT locNrowsExact;
 
     float density;
 
