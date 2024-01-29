@@ -7,6 +7,7 @@
 #include "CombBLAS/CommGrid3D.h"
 #include "CombBLAS/SpParMat3D.h"
 #include "CombBLAS/ParFriends.h"
+#include "CombBLAS/FullyDistVec.h"
 #include "CombBLAS/Autotuning/Autotuner.h"
 
 #define ATIMING
@@ -41,6 +42,10 @@ int main(int argc, char ** argv) {
     SpParMat<IT,UT,DER> A(grid);
     A.ParallelReadMM(matpath, true, maximum<double>());
     SpParMat<IT,UT,DER> B(A);
+    FullyDistVec<IT,UT> p(A.getcommgrid());
+    p.iota(A.getnrow(), 0);
+    p.RandPerm();
+    (B)(p,p,true);
 
     
     auto resultParams = tuner.TuneSpGEMM3D(A, B, autotuning::BRUTE_FORCE, matpath);

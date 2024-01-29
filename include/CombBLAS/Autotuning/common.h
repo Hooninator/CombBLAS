@@ -54,6 +54,37 @@
 
 #define INVALID_CALL_ERR() throw std::runtime_error("This method should never be called");
 
+#ifdef PROFILE
+
+#define INIT_TIMER() auto stime = MPI_Wtime(); auto etime = MPI_Wtime();
+#define START_TIMER() stime = MPI_Wtime();
+#define END_TIMER(message) \
+    do { \
+        etime = MPI_Wtime(); \
+        statPtr->Print(message + std::to_string(etime - stime)); \
+        statPtr->Log(message + std::to_string(etime - stime)); \
+    } while (false)
+
+#else
+
+#define INIT_TIMER() pass;
+#define START_TIMER() pass;
+#define END_TIMER(message) pass;
+
+#endif
+
+#ifdef DEBUG
+
+#define DEBUG_PRINT(message) debugPtr->Print(message);
+#define DEBUG_LOG(message) debugPtr->Log(message);
+
+#else
+
+#define DEBUG_PRINT(message) pass;
+#define DEBUG_LOG(message) pass;
+
+#endif
+
 
 namespace combblas {
 namespace autotuning {

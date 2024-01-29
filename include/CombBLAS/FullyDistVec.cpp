@@ -782,11 +782,9 @@ FullyDistVec<IT, IT> FullyDistVec<IT, NT>::sort()
 template <class IT, class NT>
 void FullyDistVec<IT,NT>::RandPerm()
 {
-#ifdef DETERMINISTIC
 	uint64_t seed = 1383098845;
-#else
-	uint64_t seed= time(NULL);
-#endif
+    
+	//seed = time(NULL);
     
 	MTRand M(seed);	// generate random numbers with Mersenne Twister
     MPI_Comm World = commGrid->GetWorld();
