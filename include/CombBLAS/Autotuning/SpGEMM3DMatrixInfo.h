@@ -44,7 +44,7 @@ public:
         
         END_TIMER("nnzArrRow Init Time: ");
 
-        //Synchronize to ensure all processes have activated the nnzArrColay dist_object
+        //Synchronize to ensure all processes have activated the  dist_object
         upcxx::barrier();
         MPI_Barrier(MPI_COMM_WORLD);
         
@@ -170,27 +170,19 @@ public:
         IT firstRow = gridColRank * locNrows3D; 
         IT lastRow = firstRow + locNrows3D;
 
-#ifdef DEBUG
-        debugPtr->Log("Total size: " + std::to_string(nrows*ncols));
-        debugPtr->Log("Rows 2D: " + std::to_string(locNrows)); 
-        debugPtr->Log("Cols 2D: " + std::to_string(locNcols)); 
-        debugPtr->Log("2D Nnz: " + std::to_string(locNnz));
-        debugPtr->Log("(Total procs, grid size): " + std::to_string(totalProcs) + ", " + std::to_string(gridSize));
-        debugPtr->Log("Rows 3D: " + std::to_string(locNrows3D));
-        debugPtr->Log("Last row: " + std::to_string(lastRow));
-        debugPtr->Log("Cols 3D: " + std::to_string(locNcols3D));
-        debugPtr->Log("Last col: " + std::to_string(lastCol));
-#endif
+        /* Row block offset */
+        IT rowOffset = locNrows;
 
         /* Fetch nnz counts for columns/rows mapped to this processor in the symbolic 3D grid  */
         IT locNnz3D = 0;
         // foreach column
         //TODO: Parallelize this loop with openMP
+        IT lrow; IT lcol;
         for (IT j=firstCol; j<lastCol; j++) {
             // foreach row block in this column
-            for (IT i = firstRow; i<lastRow; i+=locNrows) {
-                int targetRank = TargetRank(i,j, procCols2D);
-                locNnz3D += FetchNnz(targetRank, j, locNcols, this->nnzArrCol).wait(); //TODO: Can we use a callback + atomics instead?
+            for (IT i = firstRow; i<lastRow; i+=rowOffset) {
+                int targetRank = TargetRank(i,j, procCols2D, &lrow, &lcol);
+                locNnz3D += FetchNnz(targetRank, lcol, this->nnzArrCol).wait(); //TODO: Can we use a callback + atomics instead?
             }
         }
 
@@ -234,18 +226,37 @@ public:
                         locNrows3D * fiberRank;
         IT lastRow = firstRow + locNrows3D;
 
+        IT colOffset = locNcols;
+
+        DEBUG_LOG("Rows 3D: " + std::to_string(locNrows3D));
+        DEBUG_LOG("Cols 3D: " + std::to_string(locNcols3D));
+        DEBUG_LOG("First col: " + std::to_string(firstCol));
+        DEBUG_LOG("Last col: " + std::to_string(lastCol));
+        DEBUG_LOG("First row: " + std::to_string(firstRow));
+        DEBUG_LOG("Last row: " + std::to_string(lastRow));
+        DEBUG_LOG("Local rows: " + std::to_string(locNrows));
+        DEBUG_LOG("Local cols: " + std::to_string(locNcols));
 
         IT locNnz3D = 0;
 
         // Activate the juice
         
+        std::unordered_map<int,int> targets;
+        //TODO: Message aggregation
+        //TODO: Should probably avoid fetching rows with no nonzeros
+        IT lrow; IT lcol;
         for (IT i = firstRow; i<lastRow; i++) {
-            for (IT j = firstCol; j<lastCol; j+=locNcols) {
-                int targetRank = TargetRank(i,j,procCols2D);
-                locNnz3D += FetchNnz(targetRank, i, locNrows, this->nnzArrRow).wait();
+            for (IT j = firstCol; j<lastCol; j+=colOffset) {
+                int targetRank = TargetRank(i,j, procCols2D, &lrow, &lcol);
+                targets.insert({targetRank,0});
+                locNnz3D += FetchNnz(targetRank, lrow, this->nnzArrRow).wait();
             }
         }
 
+        DEBUG_LOG("Targets for rank " + std::to_string(rank));
+        for (auto targetIter=targets.begin(); targetIter!=targets.end(); targetIter++) {
+            DEBUG_LOG(std::to_string(targetIter->first));
+        }
 
         DEBUG_LOG("Nnz 3d B: " + std::to_string(locNnz3D));
 
@@ -256,17 +267,23 @@ public:
 
     //which rank does the jth row of column i live on?
     //TODO: This fails when the rows/columns are not evenly distributed across the 2D grid
-    int TargetRank(IT i, IT j, int procCols2D) {
-        int procRow = i / locNrows;
-        int procCol = j / locNcols;
-        return procRow * procCols2D + procCol; 
+    int TargetRank(IT i, IT j, int procDim2D, IT * lrow, IT * lcol) {
+
+        IT rowsPerProc = nrows / procDim2D;
+        IT colsPerProc = ncols / procDim2D;
+
+        int procRow = std::min(i / rowsPerProc, static_cast<IT>(procDim2D-1));
+        int procCol = std::min(j / colsPerProc, static_cast<IT>(procDim2D-1));
+        
+        *lrow = i - procRow*rowsPerProc;
+        *lcol = j - procCol*colsPerProc;
+
+        return procRow * procDim2D + procCol; 
     }
 
     // idx should be column or row index, depending on how nnzArr is indexed 
-    upcxx::future<IT> FetchNnz(int targetRank, int idx, IT locDim, distArr * nnzArr) {
+    upcxx::future<IT> FetchNnz(int targetRank, int locIdx, distArr * nnzArr) {
         
-        int locIdx = idx % locDim;
-
         return nnzArr->fetch(targetRank).then(
             [locIdx](upcxx::global_ptr<IT> nnzPtr) {
                 return upcxx::rget(nnzPtr + locIdx);
