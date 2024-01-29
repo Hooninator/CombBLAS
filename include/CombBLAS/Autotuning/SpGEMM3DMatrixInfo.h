@@ -24,7 +24,9 @@ public:
     //NOTE: loc* are values for the actual 2D processor grid
     SpGEMM3DMatrixInfo(SpParMat3D<IT,NT,DER>& M):
         nnz(M.getnnz()), ncols(M.getncol()), nrows(M.getnrow()),
-        locNnz(M.seqptr()->getnnz()), locNcols(M.seqptr()->getncol()), locNrows(M.seqptr()->getnrow())
+        locNnz(M.seqptr()->getnnz()), 
+        locNcols(M.getncol() / RoundedSqrt<IT,IT>(jobPtr->totalTasks)), 
+        locNrows(M.getnrow() / RoundedSqrt<IT,IT>(jobPtr->totalTasks))
      {
         
         INIT_TIMER();
@@ -181,8 +183,9 @@ public:
         for (IT j=firstCol; j<lastCol; j++) {
             // foreach row block in this column
             for (IT i = firstRow; i<lastRow; i+=rowOffset) {
-                int targetRank = TargetRank(i,j, procCols2D, &lrow, &lcol);
-                locNnz3D += FetchNnz(targetRank, lcol, this->nnzArrCol).wait(); //TODO: Can we use a callback + atomics instead?
+                if (i >= lastRow) break;
+                int targetRank = TargetRank(i,j, procCols2D);
+                locNnz3D += FetchNnz(targetRank, j, locNcols, this->nnzArrCol).wait(); //TODO: Can we use a callback + atomics instead?
             }
         }
 
@@ -247,11 +250,13 @@ public:
         IT lrow; IT lcol;
         for (IT i = firstRow; i<lastRow; i++) {
             for (IT j = firstCol; j<lastCol; j+=colOffset) {
-                int targetRank = TargetRank(i,j, procCols2D, &lrow, &lcol);
+                if (j >= lastCol) break; //hack for not evenly dividing cols
+                int targetRank = TargetRank(i,j, procCols2D);
                 targets.insert({targetRank,0});
-                locNnz3D += FetchNnz(targetRank, lrow, this->nnzArrRow).wait();
+                locNnz3D += FetchNnz(targetRank, i, locNrows, this->nnzArrRow).wait();
             }
         }
+
 
         DEBUG_LOG("Targets for rank " + std::to_string(rank));
         for (auto targetIter=targets.begin(); targetIter!=targets.end(); targetIter++) {
@@ -281,8 +286,15 @@ public:
         return procRow * procDim2D + procCol; 
     }
 
+
+    int TargetRank(IT i, IT j, int procDim2D) {
+        IT procRow = std::min(i / locNrows, (IT)(procDim2D-1));
+        IT procCol = std::min(j / locNcols, (IT)(procDim2D-1));
+        return procCol + procRow*procDim2D;
+    }
+
     // idx should be column or row index, depending on how nnzArr is indexed 
-    upcxx::future<IT> FetchNnz(int targetRank, int locIdx, distArr * nnzArr) {
+    upcxx::future<IT> FetchNnz(int targetRank, IT locIdx, distArr * nnzArr) {
         
         return nnzArr->fetch(targetRank).then(
             [locIdx](upcxx::global_ptr<IT> nnzPtr) {
@@ -292,6 +304,17 @@ public:
 
     }
 
+    upcxx::future<IT> FetchNnz(int targetRank, IT idx, IT dim2D, distArr * nnzArr) {
+        
+        IT locIdx = idx % dim2D;
+    
+        return nnzArr->fetch(targetRank).then(
+            [locIdx](upcxx::global_ptr<IT> nnzPtr) {
+                return upcxx::rget(nnzPtr + locIdx);
+            }
+        );
+
+    }
 
     IT ComputeMsgSize(const int locNnz) {
         return locNnz * GetNzvalSize() +
