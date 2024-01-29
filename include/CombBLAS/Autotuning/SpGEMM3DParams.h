@@ -46,7 +46,7 @@ public:
     static std::vector<SpGEMM3DParams> ConstructSearchSpace(PlatformParams& params) {
         std::vector<SpGEMM3DParams> result;
         for (int _nodes = 1; _nodes<=jobPtr->nodes; _nodes*=2) {
-            for (int _ppn=1; _ppn<=params.GetCoresPerNode(); _ppn*=2) {
+            for (int _ppn=1; _ppn<=jobPtr->tasksPerNode; _ppn*=2) {
                 if (IsPerfectSquare(_ppn*_nodes)) {
                     for (int _layers=1; _layers<=_ppn*_nodes; _layers*=2) {
                         int gridSize = (_ppn*_nodes) / _layers;
