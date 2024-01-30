@@ -5,7 +5,6 @@
 #include "common.h"
 
 
-
 namespace combblas {
 namespace autotuning {
 template <typename IT, typename NT, typename DER>
@@ -190,6 +189,9 @@ public:
 
         /* Fetch nnz counts for columns/rows mapped to this processor in the symbolic 3D grid  */
         IT locNnz3D = 0;
+        auto addNnz = [&locNnz3D](IT colNnz)mutable{locNnz3D+=colNnz;};
+
+        bool useConjFut = DecideConjFut(ppn,nodes,layers);
 
         DEBUG_LOG("Rows 3D: " + std::to_string(locNrows3D));
         DEBUG_LOG("Cols 3D: " + std::to_string(locNcols3D));
@@ -202,12 +204,12 @@ public:
         DEBUG_LOG("Local rows exact: " + std::to_string(locNrowsExact));
         DEBUG_LOG("Local cols exact: " + std::to_string(locNcolsExact));
 
-        //TODO: Parallelize this loop with openMP
-        // foreach column
 #ifdef DEBUG
         std::map<int,int> targets;
 #endif
-        IT lrow; IT lcol;
+
+        upcxx::future<> fetchFuts = upcxx::make_future();
+
         for (IT j=firstCol; j<lastCol; j++) {
             // foreach row block in this column
             for (IT i = firstRow; i<lastRow; i+=rowOffset) {
@@ -216,12 +218,17 @@ public:
                 targets.emplace(targetRank, 0);
                 targets[targetRank] += 1;
 #endif
-                FetchNnz(targetRank, j, locNcols, this->nnzArrCol).then([&locNnz3D](IT colNnz)mutable{  
-                    locNnz3D += colNnz;
-                });
+                if (useConjFut) {
+                    upcxx::future<> fetchFut = FetchNnz(targetRank, j, locNcols, this->nnzArrCol).then(
+                        addNnz
+                    );
+                    fetchFuts = upcxx::when_all(fetchFuts, fetchFut);
+                } else {
+                    locNnz3D += FetchNnz(targetRank, j, locNcols, this->nnzArrCol).wait();
+                }
             }
-
         }
+
 
         // Handle leftover columns
         if (lastCol == (ncols / procCols2D)*procCols2D) {
@@ -232,10 +239,19 @@ public:
                     targets.emplace(targetRank, 0);
                     targets[targetRank] += 1;
 #endif
-                    locNnz3D += FetchNnz(targetRank, j, locNcols, this->nnzArrCol).wait(); //TODO: Can we use a callback + atomics instead?
+                    if (useConjFut) {
+                        upcxx::future<> fetchFut = FetchNnz(targetRank, j, locNcols, this->nnzArrCol).then(
+                            addNnz
+                        );
+                        fetchFuts = upcxx::when_all(fetchFuts, fetchFut);
+                    } else {
+                        locNnz3D += FetchNnz(targetRank, j, locNcols, this->nnzArrCol).wait(); 
+                    }
                 }
             }
         }
+
+        if (useConjFut) fetchFuts.wait();
 
 #ifdef DEBUG
         DEBUG_LOG("Targets....")
@@ -243,9 +259,7 @@ public:
             DEBUG_LOG("Rank " + std::to_string(pair->first) + ": " + std::to_string(pair->second));
         }
 #endif
-
         DEBUG_LOG("Nnz 3d A: " + std::to_string(locNnz3D));
-
 
         return locNnz3D;
         
@@ -299,14 +313,18 @@ public:
         DEBUG_LOG("Local cols exact: " + std::to_string(locNcolsExact));
 
         IT locNnz3D = 0;
+        auto addNnz = [&locNnz3D](IT colNnz)mutable{locNnz3D+=colNnz;};
+
+        bool useConjFut = DecideConjFut(ppn,nodes,layers);
 
 #ifdef DEBUG
         std::map<int,int> targets;
 #endif
 
+        upcxx::future<> fetchFuts = upcxx::make_future();
+
         //TODO: Message aggregation
         //TODO: Should probably avoid fetching rows with no nonzeros
-        IT lrow; IT lcol;
         for (IT i = firstRow; i<lastRow; i++) {
             for (IT j = firstCol; j<lastCol; j+=colOffset) {
                 int targetRank = TargetRank(i,j, procCols2D);
@@ -314,7 +332,14 @@ public:
                 targets.emplace(targetRank, 0);
                 targets[targetRank] += 1;
 #endif
-                locNnz3D += FetchNnz(targetRank, i, locNrows, this->nnzArrRow).wait();
+                if (useConjFut) {
+                    upcxx::future<> fetchFut = FetchNnz(targetRank, i, locNrows, this->nnzArrRow).then(
+                        addNnz
+                    );
+                    fetchFuts = upcxx::when_all(fetchFuts, fetchFut);
+                } else {
+                    locNnz3D += FetchNnz(targetRank, i, locNrows, this->nnzArrRow).wait();
+                }
             }
         }
 
@@ -327,10 +352,19 @@ public:
                     targets.emplace(targetRank, 0);
                     targets[targetRank] += 1;
 #endif
-                    locNnz3D += FetchNnz(targetRank, i, locNrows, this->nnzArrRow).wait();
+                    if (useConjFut) {
+                        upcxx::future<> fetchFut = FetchNnz(targetRank, i, locNrows, this->nnzArrRow).then(
+                            addNnz
+                        );
+                        fetchFuts = upcxx::when_all(fetchFuts, fetchFut);
+                    } else {
+                        locNnz3D += FetchNnz(targetRank, i, locNrows, this->nnzArrRow).wait();
+                    }
                 }
             }
         }
+
+        if (useConjFut) fetchFuts.wait();
 
 
 #ifdef DEBUG
@@ -369,6 +403,7 @@ public:
         return procCol + procRow*procDim2D;
     }
 
+
     // idx should be column or row index, depending on how nnzArr is indexed 
     upcxx::future<IT> FetchNnz(int targetRank, IT locIdx, distArr * nnzArr) {
         
@@ -380,6 +415,7 @@ public:
 
     }
 
+
     upcxx::future<IT> FetchNnz(int targetRank, IT idx, IT dim2D, distArr * nnzArr) {
         IT locIdx = idx % dim2D;
         return nnzArr->fetch(targetRank).then(
@@ -387,6 +423,12 @@ public:
                 return upcxx::rget(nnzPtr + locIdx);
             }
         );
+    }
+
+
+    bool DecideConjFut(int ppn, int nodes, int layers) {
+        //TODO:
+        return true;
     }
 
     IT ComputeMsgSize(const int locNnz) {

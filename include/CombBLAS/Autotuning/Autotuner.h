@@ -106,6 +106,7 @@ public:
 
 #ifdef PROFILE
             statPtr->Log(currParams.OutStr());
+            statPtr->Print(currParams.OutStr());
 #endif
 
             double currTime = model.EstimateRuntime(input, currParams);
