@@ -98,6 +98,7 @@ public:
         CommInfo<IT> * info = MakeBcastCommInfo(params.GetRowSize(), params.GetTotalProcs(), msgSize); 
 
         double singleBcastTime = bcastModel->ComputeTime(info, opts);
+        //TODO: Reduce across row or column to get total time, then reduce across entire grid to get max time
         double finalTime = singleBcastTime * sqrt(params.GetGridSize());
 
         delete info;

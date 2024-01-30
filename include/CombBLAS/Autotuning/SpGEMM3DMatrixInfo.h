@@ -63,6 +63,8 @@ public:
         upcxx::global_ptr<IT> globNnzVec(upcxx::new_array<IT>(locNcolsExact));
         auto locNnzVec = globNnzVec.local();
 
+        std::memset((void*)locNnzVec, 0, sizeof(IT)*locNcolsExact); //for some reason, this is necessary
+
         //TODO: Use multithreaded versions of this
         for (auto colIter = M.seqptr()->begcol(); colIter != M.seqptr()->endcol(); colIter++) {
             locNnzVec[colIter.colid()] = colIter.nnz(); 
@@ -77,6 +79,8 @@ public:
         
         upcxx::global_ptr<IT> globNnzVec(upcxx::new_array<IT>(locNrowsExact));
         auto locNnzVec = globNnzVec.local();
+
+        std::memset((void*)locNnzVec,0,sizeof(IT)*locNrowsExact);
 
         //JB: This is terrible
         for (auto colIter = M.seqptr()->begcol(); colIter != M.seqptr()->endcol(); colIter++) {
@@ -108,6 +112,7 @@ public:
     
     /* Given local nnz in initial 2D processor grid, compute nnz per processor in 3D processr grid
      * WITHOUT explicitly forming the 3D processor grid. */
+     //JB: This is impractically slow as it currently stands...
     IT ComputeLocalNnz(const int ppn, const int nodes, const int layers) {
         
         INIT_TIMER();
@@ -199,6 +204,7 @@ public:
         // foreach column
 #ifdef DEBUG
         std::map<int,int> targets;
+        std::map<int,int> nnzMap;
 #endif
         IT lrow; IT lcol;
         for (IT j=firstCol; j<lastCol; j++) {
@@ -209,12 +215,17 @@ public:
                 targets.emplace(targetRank, 0);
                 targets[targetRank] += 1;
 #endif
-                locNnz3D += FetchNnz(targetRank, j, locNcols, this->nnzArrCol).wait(); //TODO: Can we use a callback + atomics instead?
+                IT colNnz = FetchNnz(targetRank, j, locNcols, this->nnzArrCol).wait(); //TODO: Can we use a callback + atomics instead?
+#ifdef DEBUGN
+                DEBUG_LOG("locNnz3D: " + std::to_string(locNnz3D));
+                DEBUG_LOG("colNnz: " + std::to_string(colNnz));
+                DEBUG_LOG("Target: " + std::to_string(targetRank));
+#endif
+                locNnz3D += colNnz;
+#ifdef DEBUG
+                nnzMap[targetRank] += colNnz;
+#endif
             }
-
-            //handle leftover rows
-            //if (lastRow==(nrows / procRows2D) * procRows2D) {
-              //  for (IT i=lastRow; i<nrows; i++) {
 
         }
 
@@ -233,12 +244,15 @@ public:
             }
         }
 
-#ifdef DEBUG
         DEBUG_LOG("Targets....")
         for (auto pair=targets.begin(); pair!=targets.end(); pair++) {
             DEBUG_LOG("Rank " + std::to_string(pair->first) + ": " + std::to_string(pair->second));
         }
-#endif
+
+        DEBUG_LOG("Nnz...")
+        for (auto pair = nnzMap.begin(); pair!=nnzMap.end(); pair++) {
+            DEBUG_LOG("Rank " + std::to_string(pair->first) + ": " + std::to_string(pair->second));
+        }
 
         DEBUG_LOG("Nnz 3d A: " + std::to_string(locNnz3D));
 
@@ -381,6 +395,7 @@ public:
     upcxx::future<IT> FetchNnz(int targetRank, IT idx, IT dim2D, distArr * nnzArr) {
         
         IT locIdx = idx % dim2D;
+        //DEBUG_LOG("Loc idx: " + std::to_string(locIdx));
     
         return nnzArr->fetch(targetRank).then(
             [locIdx](upcxx::global_ptr<IT> nnzPtr) {
