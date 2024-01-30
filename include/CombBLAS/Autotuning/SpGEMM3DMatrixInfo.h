@@ -206,7 +206,6 @@ public:
         // foreach column
 #ifdef DEBUG
         std::map<int,int> targets;
-        std::map<int,int> nnzMap;
 #endif
         IT lrow; IT lcol;
         for (IT j=firstCol; j<lastCol; j++) {
@@ -217,23 +216,15 @@ public:
                 targets.emplace(targetRank, 0);
                 targets[targetRank] += 1;
 #endif
-                IT colNnz = FetchNnz(targetRank, j, locNcols, this->nnzArrCol).wait(); //TODO: Can we use a callback + atomics instead?
-#ifdef DEBUGN
-                DEBUG_LOG("locNnz3D: " + std::to_string(locNnz3D));
-                DEBUG_LOG("colNnz: " + std::to_string(colNnz));
-                DEBUG_LOG("Target: " + std::to_string(targetRank));
-#endif
-                locNnz3D += colNnz;
-#ifdef DEBUG
-                nnzMap[targetRank] += colNnz;
-#endif
+                FetchNnz(targetRank, j, locNcols, this->nnzArrCol).then([&locNnz3D](IT colNnz)mutable{  
+                    locNnz3D += colNnz;
+                });
             }
 
         }
 
         // Handle leftover columns
         if (lastCol == (ncols / procCols2D)*procCols2D) {
-            DEBUG_LOG("Doing edge case...");
             for (IT j=lastCol; j<ncols; j++) {
                 for (IT i = firstRow; i<lastRow; i+=rowOffset) {
                     int targetRank = TargetRank(i,j, procCols2D);
@@ -246,15 +237,12 @@ public:
             }
         }
 
+#ifdef DEBUG
         DEBUG_LOG("Targets....")
         for (auto pair=targets.begin(); pair!=targets.end(); pair++) {
             DEBUG_LOG("Rank " + std::to_string(pair->first) + ": " + std::to_string(pair->second));
         }
-
-        DEBUG_LOG("Nnz...")
-        for (auto pair = nnzMap.begin(); pair!=nnzMap.end(); pair++) {
-            DEBUG_LOG("Rank " + std::to_string(pair->first) + ": " + std::to_string(pair->second));
-        }
+#endif
 
         DEBUG_LOG("Nnz 3d A: " + std::to_string(locNnz3D));
 
@@ -288,7 +276,6 @@ public:
         IT locNcols3D = locNcols * (procCols2D/gridCols); 
         IT firstCol = gridRowRank * locNcols3D;
         IT lastCol = firstCol + locNcols3D;
-        //if (gridSize==1) lastCol = (ncols / layers) * layers;
 
         IT locNrows3D; 
         locNrows3D = locNrows * (procRows2D/gridRows);
@@ -361,7 +348,6 @@ public:
 
 
     //which rank does the jth row of column i live on?
-    //TODO: This fails when the rows/columns are not evenly distributed across the 2D grid
     int TargetRank(IT i, IT j, int procDim2D, IT * lrow, IT * lcol) {
 
         IT rowsPerProc = nrows / procDim2D;
@@ -395,16 +381,12 @@ public:
     }
 
     upcxx::future<IT> FetchNnz(int targetRank, IT idx, IT dim2D, distArr * nnzArr) {
-        
         IT locIdx = idx % dim2D;
-        //DEBUG_LOG("Loc idx: " + std::to_string(locIdx));
-    
         return nnzArr->fetch(targetRank).then(
             [locIdx](upcxx::global_ptr<IT> nnzPtr) {
                 return upcxx::rget(nnzPtr + locIdx);
             }
         );
-
     }
 
     IT ComputeMsgSize(const int locNnz) {

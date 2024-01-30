@@ -42,7 +42,7 @@
 
 
 #define PROFILE 
-#define DEBUG
+//#define DEBUG
 
 #define ASSERT(condition, message) \
     do { \
@@ -75,7 +75,7 @@
 
 #ifdef DEBUG
 
-#define DEBUG_PRINT(message) debugPtr->Print(message);
+#define DEBUG_PRINT(message) if(rank==0) debugPtr->Print(message);
 #define DEBUG_LOG(message) debugPtr->Log(message);
 
 #else
