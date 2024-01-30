@@ -62,8 +62,8 @@ public:
         CommModel<AIT> *bcastModel = new PostCommModel<AIT>(platformParams.GetInternodeAlpha(),
                                                     platformParams.GetInternodeBeta(),
                                                      platformParams.GetIntranodeBeta());
-        double bcastATime = BcastTime(bcastModel, Ainfo, params);
-        double bcastBTime = BcastTime(bcastModel, Binfo, params);
+        double bcastATime = BcastTime(bcastModel, Ainfo, params, true);
+        double bcastBTime = BcastTime(bcastModel, Binfo, params, false);
         
         LocalSpGEMMModel * localMultModel = new RegressionLocalSpGEMMModel(autotuning::regSpGEMMPerlmutter);
         double localMultTime = LocalMultTime(localMultModel, Ainfo, Binfo, params);
@@ -82,8 +82,9 @@ public:
 
     /* BROADCAST */
 
+    //TODO: Consider nnz estimator class + template to make switching between things here easier
     template <typename IT, typename NT, typename DER>
-    double BcastTime(CommModel<IT> * bcastModel, SpGEMM3DMatrixInfo<IT,NT,DER>& Minfo, SpGEMM3DParams& params) {
+    double BcastTime(CommModel<IT> * bcastModel, SpGEMM3DMatrixInfo<IT,NT,DER>& Minfo, SpGEMM3DParams& params, bool row) {
 #ifdef PROFILE
         auto stime1 = MPI_Wtime();
 #endif
@@ -95,11 +96,34 @@ public:
             //gridSize <= params.GetCoresPerNode() ? true : false //intranode
             false
         };
-        CommInfo<IT> * info = MakeBcastCommInfo(params.GetRowSize(), params.GetTotalProcs(), msgSize); 
+        CommInfo<IT> * info = MakeBcastCommInfo(params.GetGridDim(), params.GetTotalProcs(), msgSize); 
 
         double singleBcastTime = bcastModel->ComputeTime(info, opts);
         //TODO: Reduce across row or column to get total time, then reduce across entire grid to get max time
-        double finalTime = singleBcastTime * sqrt(params.GetGridSize());
+        
+        double totalLocalTime = 0;
+
+        MPI_Comm gridComm = params.GridComm();
+        MPI_Comm worldComm = params.WorldComm();
+        MPI_Comm reduceComm;
+
+        if (row) {
+            reduceComm = params.RowComm(gridComm);
+        } else {
+            reduceComm = params.ColComm(gridComm);
+        }
+
+        /* Reduce across row/col to get total bcast time */
+        for (int i=0; i<params.GetGridDim(); i++) {
+            MPI_Reduce((void*)(&singleBcastTime), (void*)(&totalLocalTime), 1, MPI_DOUBLE, MPI_SUM, i, reduceComm);
+        }
+        
+        /* Reduce across all processors in symbolic 3D grid to get max time on rank 0 */
+        double finalTime = 0;
+        MPI_Reduce((void*)(&totalLocalTime), (void*)(&finalTime), 1, MPI_DOUBLE, MPI_MAX, 0, worldComm); 
+         
+    
+        //double finalTime = singleBcastTime * sqrt(params.GetGridSize());
 
         delete info;
         delete opts;
