@@ -67,9 +67,9 @@
 
 #else
 
-#define INIT_TIMER() pass;
-#define START_TIMER() pass;
-#define END_TIMER(message) pass;
+#define INIT_TIMER() 
+#define START_TIMER() 
+#define END_TIMER(message) 
 
 #endif
 
@@ -80,8 +80,8 @@
 
 #else
 
-#define DEBUG_PRINT(message) pass;
-#define DEBUG_LOG(message) pass;
+#define DEBUG_PRINT(message) 
+#define DEBUG_LOG(message) 
 
 #endif
 
@@ -123,7 +123,7 @@ public:
 
         nodes = std::atoi(std::getenv("SLURM_NNODES"));
         tasksPerNode = std::atoi(std::getenv("SLURM_NTASKS_PER_NODE"));
-        totalTasks = std::atoi(std::getenv("SLURM_NTASKS"));
+        totalTasks = tasksPerNode*nodes;
 
         if (std::getenv("SLURM_GPUS")!=nullptr)
             totalGPUs = std::atoi(std::getenv("SLURM_GPUS"));

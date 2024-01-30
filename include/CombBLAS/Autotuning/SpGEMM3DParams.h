@@ -26,7 +26,7 @@ public:
         totalProcs(nodes*ppn)
     {
         gridSize = totalProcs / layers;
-        rowSize = RoundedSqrt<int,int>(gridSize);
+        gridDim = RoundedSqrt<int,int>(gridSize);
     }
 
 
@@ -95,12 +95,54 @@ public:
 
     }
 
+    
+    /* Utility functions for getting MPI Communicators across symbolic 3D grid */
+
+    MPI_Comm GridComm() {
+        int color = rank / gridSize;
+        int key = rank % gridSize;
+        MPI_Comm gridComm;
+        MPI_Comm_split(MPI_COMM_WORLD, color, key, &gridComm);
+        return gridComm;
+    }
+
+
+    MPI_Comm RowComm(MPI_Comm gridComm) {
+        int gridRank;
+        MPI_Comm_rank(gridComm, &gridRank);
+        int color = gridRank / gridDim;
+        int key = gridRank % gridDim;
+        MPI_Comm rowComm;
+        MPI_Comm_split(gridComm, color, key, &rowComm);
+        return rowComm;
+    }
+
+
+    MPI_Comm ColComm(MPI_Comm gridComm) {
+        int gridRank;
+        MPI_Comm_rank(gridComm, &gridRank);
+        int color = gridRank % gridDim;
+        int key = gridRank / gridDim;
+        MPI_Comm colComm;
+        MPI_Comm_split(gridComm, color, key, &colComm);
+        return colComm;
+    }
+
+    MPI_Comm WorldComm() {
+        int color = (rank < totalProcs) ? 0 : 1;
+        int key = rank;
+        MPI_Comm worldComm;
+        MPI_Comm_split(MPI_COMM_WORLD, color, key, &worldComm);
+        return worldComm;
+    }
+
+
     inline int GetNodes() const {return nodes;}
     inline int GetPPN() const {return ppn;}
     inline int GetLayers() const {return layers;}
     inline int GetTotalProcs() const {return totalProcs;}
     inline int GetGridSize() const {return gridSize;}
-    inline int GetRowSize() const {return rowSize;}
+    inline int GetGridDim() const {return gridDim;}
 
 private:
     /* Tunable parameters */
@@ -111,7 +153,7 @@ private:
     /* Other handy info */
     int totalProcs;
     int gridSize;
-    int rowSize;
+    int gridDim;
 
 
 

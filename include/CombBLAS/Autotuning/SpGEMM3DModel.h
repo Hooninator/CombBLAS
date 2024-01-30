@@ -4,16 +4,14 @@
 
 
 #include "common.h"
-
 #include "SpGEMM3DMatrixInfo.h"
-
 #include "CommModel.h"
 #include "BcastInfo.h"
 #include "LocalSpGEMMModel.h"
 #include "MergeModel.h"
 #include "SpGEMM3DParams.h"
-
 #include "PlatformParams.h"
+#include "NnzEstimator.h"
 
 
 namespace combblas {
