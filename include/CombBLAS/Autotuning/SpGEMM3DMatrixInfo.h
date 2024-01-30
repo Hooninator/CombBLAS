@@ -140,6 +140,8 @@ public:
 
         }
 
+        upcxx::barrier();
+
         END_TIMER("Compute 3D nnz time: ");
 
         return locNnz;
