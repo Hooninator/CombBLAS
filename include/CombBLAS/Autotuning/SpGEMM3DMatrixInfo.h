@@ -154,6 +154,7 @@ public:
 
         if (totalProcs==1) return locNnz;
         if (rank>=totalProcs) return 0; //return if this rank isn't part of the 3D grid
+        bool useConjFut = DecideConjFut(ppn,nodes,layers);
 
         /* Info about currently, actually formed 2D processor grid */
         const int totalProcs2D = jobPtr->totalTasks;
@@ -187,12 +188,6 @@ public:
         /* Row block offset */
         IT rowOffset = locNrows;
 
-        /* Fetch nnz counts for columns/rows mapped to this processor in the symbolic 3D grid  */
-        IT locNnz3D = 0;
-        auto addNnz = [&locNnz3D](IT colNnz)mutable{locNnz3D+=colNnz;};
-
-        bool useConjFut = DecideConjFut(ppn,nodes,layers);
-
         DEBUG_LOG("Rows 3D: " + std::to_string(locNrows3D));
         DEBUG_LOG("Cols 3D: " + std::to_string(locNcols3D));
         DEBUG_LOG("First col: " + std::to_string(firstCol));
@@ -204,61 +199,11 @@ public:
         DEBUG_LOG("Local rows exact: " + std::to_string(locNrowsExact));
         DEBUG_LOG("Local cols exact: " + std::to_string(locNcolsExact));
 
-#ifdef DEBUG
-        std::map<int,int> targets;
-#endif
-
-        upcxx::future<> fetchFuts = upcxx::make_future();
-
-        for (IT j=firstCol; j<lastCol; j++) {
-            // foreach row block in this column
-            for (IT i = firstRow; i<lastRow; i+=rowOffset) {
-                int targetRank = TargetRank(i,j, procCols2D);
-#ifdef DEBUG
-                targets.emplace(targetRank, 0);
-                targets[targetRank] += 1;
-#endif
-                if (useConjFut) {
-                    upcxx::future<> fetchFut = FetchNnz(targetRank, j, locNcols, this->nnzArrCol).then(
-                        addNnz
-                    );
-                    fetchFuts = upcxx::when_all(fetchFuts, fetchFut);
-                } else {
-                    locNnz3D += FetchNnz(targetRank, j, locNcols, this->nnzArrCol).wait();
-                }
-            }
-        }
+		IT locNnz3D = SumLocalNnzRange(COL_SPLIT, firstRow, lastRow,
+										firstCol, lastCol,
+										procCols2D, useConjFut);
 
 
-        // Handle leftover columns
-        if (lastCol == (ncols / procCols2D)*procCols2D) {
-            for (IT j=lastCol; j<ncols; j++) {
-                for (IT i = firstRow; i<lastRow; i+=rowOffset) {
-                    int targetRank = TargetRank(i,j, procCols2D);
-#ifdef DEBUG
-                    targets.emplace(targetRank, 0);
-                    targets[targetRank] += 1;
-#endif
-                    if (useConjFut) {
-                        upcxx::future<> fetchFut = FetchNnz(targetRank, j, locNcols, this->nnzArrCol).then(
-                            addNnz
-                        );
-                        fetchFuts = upcxx::when_all(fetchFuts, fetchFut);
-                    } else {
-                        locNnz3D += FetchNnz(targetRank, j, locNcols, this->nnzArrCol).wait(); 
-                    }
-                }
-            }
-        }
-
-        if (useConjFut) fetchFuts.wait();
-
-#ifdef DEBUG
-        DEBUG_LOG("Targets....")
-        for (auto pair=targets.begin(); pair!=targets.end(); pair++) {
-            DEBUG_LOG("Rank " + std::to_string(pair->first) + ": " + std::to_string(pair->second));
-        }
-#endif
         DEBUG_LOG("Nnz 3d A: " + std::to_string(locNnz3D));
 
         return locNnz3D;
@@ -272,6 +217,8 @@ public:
 
         if (totalProcs==1) return locNnz;
         if (rank>=totalProcs) return 0; //return if this rank isn't part of the 3D grid
+
+		bool useConjFut = DecideConjFut(ppn, nodes, layers);
 
         /* Info about currently, actually formed 2D processor grid */
         const int totalProcs2D = jobPtr->totalTasks;
@@ -312,10 +259,51 @@ public:
         DEBUG_LOG("Local rows exact: " + std::to_string(locNrowsExact));
         DEBUG_LOG("Local cols exact: " + std::to_string(locNcolsExact));
 
+		IT locNnz3D = SumLocalNnzRange(ROW_SPLIT, firstRow, lastRow,
+										firstCol, lastCol,
+										procRows2D, useConjFut); 
+
+        DEBUG_LOG("Nnz 3d B: " + std::to_string(locNnz3D));
+
+
+        return locNnz3D;
+    }
+
+    
+    IT SumLocalNnzRange(SPLIT split, 
+						IT firstRow, IT lastRow,
+						IT firstCol, IT lastCol,
+						int procDim2D,
+						bool useConjFut) 
+    {
         IT locNnz3D = 0;
         auto addNnz = [&locNnz3D](IT colNnz)mutable{locNnz3D+=colNnz;};
-
-        bool useConjFut = DecideConjFut(ppn,nodes,layers);
+		
+		IT outerStart;
+	    IT outerEnd;
+        IT innerStart;
+        IT innerEnd;
+        IT offset;
+        IT locDimMod;
+        distArr * nnzArr;
+        
+		if (split==ROW_SPLIT) {
+            outerStart = firstRow;
+            outerEnd = lastRow;
+            innerStart = firstCol;
+            innerEnd = lastCol;
+            offset = this->locNcols;
+            locDimMod = this->locNrows;
+            nnzArr = this->nnzArrRow;
+        } else if (split==COL_SPLIT) {
+            outerStart = firstCol;
+            outerEnd = lastCol;
+            innerStart = firstRow;
+            innerEnd = lastRow;
+            offset = this->locNrows;
+            locDimMod = this->locNcols;
+            nnzArr = this->nnzArrCol;
+        }
 
 #ifdef DEBUG
         std::map<int,int> targets;
@@ -325,40 +313,51 @@ public:
 
         //TODO: Message aggregation
         //TODO: Should probably avoid fetching rows with no nonzeros
-        for (IT i = firstRow; i<lastRow; i++) {
-            for (IT j = firstCol; j<lastCol; j+=colOffset) {
-                int targetRank = TargetRank(i,j, procCols2D);
+		
+        for (IT k = outerStart; k<outerEnd; k++) {
+            for (IT l = innerStart; l<innerEnd; l+=offset) {
+                int targetRank = TargetRank(k,l, procDim2D, split);
 #ifdef DEBUG
                 targets.emplace(targetRank, 0);
                 targets[targetRank] += 1;
 #endif
                 if (useConjFut) {
-                    upcxx::future<> fetchFut = FetchNnz(targetRank, i, locNrows, this->nnzArrRow).then(
+                    upcxx::future<> fetchFut = FetchNnz(targetRank, k, locDimMod, nnzArr).then(
                         addNnz
                     );
                     fetchFuts = upcxx::when_all(fetchFuts, fetchFut);
                 } else {
-                    locNnz3D += FetchNnz(targetRank, i, locNrows, this->nnzArrRow).wait();
+                    locNnz3D += FetchNnz(targetRank, k, locDimMod, nnzArr).wait();
                 }
             }
         }
+        
+        //Handle edge case
+		bool edge;
+		IT edgeEnd;
+		if (split==ROW_SPLIT) {
+			edge = (lastRow==(nrows / procDim2D)*procDim2D);
+			edgeEnd = nrows;
+		} else if (split==COL_SPLIT) {
+			edge = (lastCol==(ncols / procDim2D)*procDim2D);
+			edgeEnd = ncols;
+		}	
 
-        // Handle leftovers
-        if (lastRow == (nrows / procRows2D)*procRows2D) {
-            for (IT i = lastRow; i<nrows; i++) {
-                for (IT j = firstCol; j<lastCol; j+=colOffset) {
-                    int targetRank = TargetRank(i,j, procCols2D);
+        if (edge) {
+            for (IT k = outerEnd; k<edgeEnd; k++) {
+                for (IT l = innerStart; l<outerStart; l+=offset) {
+                    int targetRank = TargetRank(k,l, procDim2D, split);
 #ifdef DEBUG
                     targets.emplace(targetRank, 0);
                     targets[targetRank] += 1;
 #endif
                     if (useConjFut) {
-                        upcxx::future<> fetchFut = FetchNnz(targetRank, i, locNrows, this->nnzArrRow).then(
+                        upcxx::future<> fetchFut = FetchNnz(targetRank, k, locDimMod, nnzArr).then(
                             addNnz
                         );
                         fetchFuts = upcxx::when_all(fetchFuts, fetchFut);
                     } else {
-                        locNnz3D += FetchNnz(targetRank, i, locNrows, this->nnzArrRow).wait();
+                        locNnz3D += FetchNnz(targetRank, k, locDimMod, nnzArr).wait();
                     }
                 }
             }
@@ -366,18 +365,7 @@ public:
 
         if (useConjFut) fetchFuts.wait();
 
-
-#ifdef DEBUG
-        DEBUG_LOG("Targets....")
-        for (auto pair=targets.begin(); pair!=targets.end(); pair++) {
-            DEBUG_LOG("Rank " + std::to_string(pair->first) + ": " + std::to_string(pair->second));
-        }
-#endif
-
-        DEBUG_LOG("Nnz 3d B: " + std::to_string(locNnz3D));
-
-
-        return locNnz3D;
+		return locNnz3D;
     }
 
 
@@ -397,22 +385,20 @@ public:
     }
 
 
-    int TargetRank(IT i, IT j, int procDim2D) {
+    int TargetRank(IT outerDim, IT innerDim, int procDim2D, SPLIT split) {
+
+        int i, j;
+        if (split==ROW_SPLIT) {
+            i = outerDim;
+            j = innerDim;
+        } else if (split==COL_SPLIT) {
+            i = innerDim;
+            j = outerDim;
+        }
+        
         IT procRow = std::min(i / locNrows, (IT)(procDim2D-1));
         IT procCol = std::min(j / locNcols, (IT)(procDim2D-1));
         return procCol + procRow*procDim2D;
-    }
-
-
-    // idx should be column or row index, depending on how nnzArr is indexed 
-    upcxx::future<IT> FetchNnz(int targetRank, IT locIdx, distArr * nnzArr) {
-        
-        return nnzArr->fetch(targetRank).then(
-            [locIdx](upcxx::global_ptr<IT> nnzPtr) {
-                return upcxx::rget(nnzPtr + locIdx);
-            }
-        );
-
     }
 
 
