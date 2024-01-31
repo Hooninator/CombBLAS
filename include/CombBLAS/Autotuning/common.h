@@ -16,7 +16,7 @@
 #include <string>
 #include <algorithm>
 #include <numeric>
-#include <upcxx/upcxx.hpp>
+//#include <upcxx/upcxx.hpp>
 
 #include "CombBLAS/SpMat.h"
 #include "CombBLAS/SpTuples.h"
@@ -160,7 +160,7 @@ void Init(JobManager jm) {
     MPI_Initialized(&initialized);
     ASSERT(initialized==1, "Please call MPI_Init() before calling this function");
 
-    upcxx::init();
+    //upcxx::init();
 
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &worldSize);
@@ -195,7 +195,7 @@ void Finalize() {
 
     delete jobPtr;
     
-    upcxx::finalize();
+    //upcxx::finalize();
 
 }
 

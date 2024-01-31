@@ -29,8 +29,8 @@ find_package(MPI REQUIRED)
 find_package(OpenMP)
 
 # UPCXX dependency
-find_package(UPCXX REQUIRED)
-target_link_libraries(CombBLAS PUBLIC UPCXX::upcxx)
+#find_package(UPCXX REQUIRED)
+#target_link_libraries(CombBLAS PUBLIC UPCXX::upcxx)
 
 if(TARGET MPI::MPI_CXX) # Use target if available (CMake >= 3.9)
   target_link_libraries(CombBLAS PUBLIC MPI::MPI_CXX)

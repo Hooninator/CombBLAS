@@ -16,7 +16,6 @@ public:
     typedef NT nzType;
     typedef DER seqType;
 
-    typedef upcxx::dist_object<upcxx::global_ptr<IT>> distArr;
 
     enum SPLIT {COL_SPLIT, ROW_SPLIT} typedef SPLIT;
 
@@ -38,41 +37,19 @@ public:
         START_TIMER();
 
         nnzArrCol = NnzArrCol(M); 
-        nnzArrColDist = new distArr(InitNnzArrCol(M));
 
         END_TIMER("nnzArrCol Init Time: ");
 
         START_TIMER();
 
-        nnzArrRowDist = new distArr(InitNnzArrRow(M));
 
         END_TIMER("nnzArrRow Init Time: ");
 
         //Synchronize to ensure all processes have activated the  dist_object
-        upcxx::barrier();
         MPI_Barrier(MPI_COMM_WORLD);
         
     }
 
-
-    /* Initialize global pointer to local nnz array */
-    //TODO: Does this even need to be distributed?
-    //TODO: Move this to SpParMat constructor
-    upcxx::global_ptr<IT> InitNnzArrCol(SpParMat3D<IT,NT,DER>& M) {
-
-        upcxx::global_ptr<IT> globNnzVec(upcxx::new_array<IT>(locNcolsExact));
-        auto locNnzVec = globNnzVec.local();
-
-        std::memset((void*)locNnzVec, 0, sizeof(IT)*locNcolsExact); //for some reason, this is necessary
-
-        //TODO: Use multithreaded versions of this
-        for (auto colIter = M.seqptr()->begcol(); colIter != M.seqptr()->endcol(); colIter++) {
-            locNnzVec[colIter.colid()] = colIter.nnz(); 
-        }
-
-        return globNnzVec;
-
-    } 
 
 
     /* Initialize array containing nnz per column on each processor, then gather on processor 0  */
@@ -123,17 +100,7 @@ public:
     /* Initialize array containing nnz per row on each processor, then gather on processor 0 */
     std::vector<IT> NnzArrRow(SpParMat3D<IT,NT,DER>& M) {
     
-    }
-
-    
-    upcxx::global_ptr<IT> InitNnzArrRow(SpParMat3D<IT,NT,DER>& M) {
-        
-        upcxx::global_ptr<IT> globNnzVec(upcxx::new_array<IT>(locNrowsExact));
-        auto locNnzVec = globNnzVec.local();
-
-        std::memset((void*)locNnzVec,0,sizeof(IT)*locNrowsExact);
-
-        //JB: This is terrible
+        std::vector<IT> locNnzVec(locNrowsExact);
         for (auto colIter = M.seqptr()->begcol(); colIter != M.seqptr()->endcol(); colIter++) {
             // Iterate through each element of this column and add it to the nonzero array
             for (auto nzIter = M.seqptr()->begnz(colIter); nzIter != M.seqptr()->endnz(colIter); nzIter++) {
@@ -142,8 +109,7 @@ public:
 
         }
 
-        return globNnzVec;
-
+        return locNnzVec;
     }
 
 
@@ -191,7 +157,7 @@ public:
 
         }
 
-        upcxx::barrier();
+        //upcxx::barrier();
 
         END_TIMER("Compute 3D nnz time: ");
 
@@ -206,7 +172,6 @@ public:
 
         if (totalProcs==1) return locNnz;
         if (rank>=totalProcs) return 0; //return if this rank isn't part of the 3D grid
-        bool useConjFut = DecideConjFut(ppn,nodes,layers);
 
         /* Info about currently, actually formed 2D processor grid */
         const int totalProcs2D = jobPtr->totalTasks;
@@ -253,7 +218,7 @@ public:
 
         IT locNnz3D = SumLocalNnzRange(COL_SPLIT, firstRow, lastRow,
                                         firstCol, lastCol,
-                                        procCols2D, useConjFut);
+                                        procCols2D);
 
 
         DEBUG_LOG("Nnz 3d A: " + std::to_string(locNnz3D));
@@ -269,8 +234,6 @@ public:
 
         if (totalProcs==1) return locNnz;
         if (rank>=totalProcs) return 0; //return if this rank isn't part of the 3D grid
-
-        bool useConjFut = DecideConjFut(ppn, nodes, layers);
 
         /* Info about currently, actually formed 2D processor grid */
         const int totalProcs2D = jobPtr->totalTasks;
@@ -313,7 +276,7 @@ public:
 
         IT locNnz3D = SumLocalNnzRange(ROW_SPLIT, firstRow, lastRow,
                                         firstCol, lastCol,
-                                        procRows2D, useConjFut); 
+                                        procRows2D); 
 
         DEBUG_LOG("Nnz 3d B: " + std::to_string(locNnz3D));
 
@@ -325,8 +288,7 @@ public:
     IT SumLocalNnzRange(SPLIT split, 
                         IT firstRow, IT lastRow,
                         IT firstCol, IT lastCol,
-                        int procDim2D,
-                        bool useConjFut) 
+                        int procDim2D)
     {
         IT locNnz3D = 0;
         auto addNnz = [&locNnz3D](IT colNnz)mutable{locNnz3D+=colNnz;};
@@ -337,7 +299,7 @@ public:
         IT innerEnd;
         IT offset;
         IT locDimMod;
-        distArr * nnzArr;
+      //  distArr * nnzArr;
         
         if (split==ROW_SPLIT) {
             outerStart = firstRow;
@@ -346,7 +308,7 @@ public:
             innerEnd = lastCol;
             offset = this->locNcols;
             locDimMod = this->locNrows;
-            nnzArr = this->nnzArrRowDist;
+        //    nnzArr = this->nnzArrRowDist;
         } else if (split==COL_SPLIT) {
             outerStart = firstCol;
             outerEnd = lastCol;
@@ -354,33 +316,23 @@ public:
             innerEnd = lastRow;
             offset = this->locNrows;
             locDimMod = this->locNcols;
-            nnzArr = this->nnzArrColDist;
+          //  nnzArr = this->nnzArrColDist;
         }
 
 #ifdef DEBUG
         std::map<int,int> targets;
 #endif
 
-        upcxx::future<> fetchFuts = upcxx::make_future();
 
         //TODO: Message aggregation
         //TODO: Should probably avoid fetching rows with no nonzeros
         
         for (IT k = outerStart; k<outerEnd; k++) {
             for (IT l = innerStart; l<innerEnd; l+=offset) {
-                int targetRank = TargetRank(k,l, procDim2D, split);
 #ifdef DEBUG
                 targets.emplace(targetRank, 0);
                 targets[targetRank] += 1;
 #endif
-                if (useConjFut) {
-                    upcxx::future<> fetchFut = FetchNnz(targetRank, k, locDimMod, nnzArr).then(
-                        addNnz
-                    );
-                    fetchFuts = upcxx::when_all(fetchFuts, fetchFut);
-                } else {
-                    locNnz3D += FetchNnz(targetRank, k, locDimMod, nnzArr).wait();
-                }
             }
         }
         
@@ -403,19 +355,9 @@ public:
                     targets.emplace(targetRank, 0);
                     targets[targetRank] += 1;
 #endif
-                    if (useConjFut) {
-                        upcxx::future<> fetchFut = FetchNnz(targetRank, k, locDimMod, nnzArr).then(
-                            addNnz
-                        );
-                        fetchFuts = upcxx::when_all(fetchFuts, fetchFut);
-                    } else {
-                        locNnz3D += FetchNnz(targetRank, k, locDimMod, nnzArr).wait();
-                    }
                 }
             }
         }
-
-        if (useConjFut) fetchFuts.wait();
 
         return locNnz3D;
     }
@@ -453,21 +395,6 @@ public:
         return procCol + procRow*procDim2D;
     }
 
-
-    upcxx::future<IT> FetchNnz(int targetRank, IT idx, IT dim2D, distArr * nnzArr) {
-        IT locIdx = idx % dim2D;
-        return nnzArr->fetch(targetRank).then(
-            [locIdx](upcxx::global_ptr<IT> nnzPtr) {
-                return upcxx::rget(nnzPtr + locIdx);
-            }
-        );
-    }
-
-
-    bool DecideConjFut(int ppn, int nodes, int layers) {
-        //TODO:
-        return true;
-    }
 
     IT ComputeMsgSize(const int locNnz) {
         return locNnz * GetNzvalSize() +
@@ -515,9 +442,6 @@ private:
 
     std::vector<IT> nnzArrCol;
     std::vector<IT> nnzArrRow;
-
-    distArr * nnzArrColDist;
-    distArr * nnzArrRowDist;
 
 };
 
