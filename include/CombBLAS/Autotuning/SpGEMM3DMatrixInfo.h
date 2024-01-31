@@ -38,10 +38,13 @@ public:
         START_TIMER();
 
         nnzArrCol = NnzArrCol(M); 
+        nnzArrColDist = new distArr(InitNnzArrCol(M));
 
         END_TIMER("nnzArrCol Init Time: ");
 
         START_TIMER();
+
+        nnzArrRowDist = new distArr(InitNnzArrRow(M));
 
         END_TIMER("nnzArrRow Init Time: ");
 
@@ -80,37 +83,38 @@ public:
         std::fill(nnzArrLoc.begin(), nnzArrLoc.end(), 0);
         
         // Init local columns
-        std::for_each(M.seqptr()->begcol, M.seqptr()->endcol(), [&nnzArrLoc](auto colIter) mutable {
+        for (auto colIter = M.seqptr()->begcol(); colIter!=M.seqptr()->endcol(); colIter++) {
             nnzArrLoc[colIter.colid()] = colIter.nnz();
-        });
+        }
 
         // Reduce across each processor column to get column counts on processor row 0
         std::vector<IT> nnzArrAggregate(locNcolsExact);
         MPI_Reduce(nnzArrLoc.data(), nnzArrAggregate.data(), nnzArrLoc.size(),
-                    MPIType<IT>(), M.getcommgrid()->GetColWorld());
+                    MPIType<IT>(), MPI_SUM, 0, M.getcommgrid()->GetCommGridLayer()->GetColWorld());
 
         //Now, gatherv onto rank 0 across row 0 of processor grid
         //Note that gatherv is needed instead of gather because the last processor could have edge columns
 
         // Vector storing nonzeros of all ranks 
-        std::vector<IT> nnzArrGlob(M.ncols);
+        std::vector<IT> nnzArrGlob(M.getncol());
 
         // Get recvcounts
-        std::vector<IT> recvCounts(worldSize);
-        IT locRecvCount = locNcols;
+        // int could => overflow... but MPI
+        std::vector<int> recvCounts(worldSize);
+        int locRecvCount = static_cast<int>(locNcols);
         MPI_Gather((void*)(&locRecvCount), 1, MPIType<IT>(), 
                         recvCounts.data(), 1, MPIType<IT>(), 
-                        0, M.getcommgrid()->GetRowWorld());
+                        0, M.getcommgrid()->GetCommGridLayer()->GetRowWorld());
 
         // Get displacements
         // This should be the same as recvcounts, since we want to displace each received array
         // by its size
-        std::vector<IT> * displs = &recvCounts;
+        std::vector<int> * displs = &recvCounts;
 
         // Gatherv to populate rank 0 array for all columns
         MPI_Gatherv(nnzArrLoc.data(), nnzArrLoc.size(), MPIType<IT>(),
                     nnzArrGlob.data(), recvCounts.data(), displs->data(), MPIType<IT>(),
-                    0, M.getcommgrid()->GetRowWorld());
+                    0, M.getcommgrid()->GetCommGridLayer()->GetRowWorld());
 
         return nnzArrGlob;
 
@@ -342,7 +346,7 @@ public:
             innerEnd = lastCol;
             offset = this->locNcols;
             locDimMod = this->locNrows;
-            nnzArr = this->nnzArrRow;
+            nnzArr = this->nnzArrRowDist;
         } else if (split==COL_SPLIT) {
             outerStart = firstCol;
             outerEnd = lastCol;
@@ -350,7 +354,7 @@ public:
             innerEnd = lastRow;
             offset = this->locNrows;
             locDimMod = this->locNcols;
-            nnzArr = this->nnzArrCol;
+            nnzArr = this->nnzArrColDist;
         }
 
 #ifdef DEBUG
@@ -511,6 +515,9 @@ private:
 
     std::vector<IT> nnzArrCol;
     std::vector<IT> nnzArrRow;
+
+    distArr * nnzArrColDist;
+    distArr * nnzArrRowDist;
 
 };
 
