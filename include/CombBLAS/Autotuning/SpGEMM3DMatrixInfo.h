@@ -37,14 +37,12 @@ public:
         
         START_TIMER();
 
-        nnzArrCol = new distArr(InitNnzArrCol(M));
+        nnzArrCol = NnzArrCol(M); 
 
         END_TIMER("nnzArrCol Init Time: ");
 
         START_TIMER();
 
-        nnzArrRow = new distArr(InitNnzArrRow(M));
-        
         END_TIMER("nnzArrRow Init Time: ");
 
         //Synchronize to ensure all processes have activated the  dist_object
@@ -72,6 +70,56 @@ public:
         return globNnzVec;
 
     } 
+
+
+    /* Initialize array containing nnz per column on each processor, then gather on processor 0  */
+    std::vector<IT> NnzArrCol(SpParMat3D<IT,NT,DER>& M) {
+        
+        // Make local vector, init to zero
+        std::vector<IT> nnzArrLoc(locNcolsExact);
+        std::fill(nnzArrLoc.begin(), nnzArrLoc.end(), 0);
+        
+        // Init local columns
+        std::for_each(M.seqptr()->begcol, M.seqptr()->endcol(), [&nnzArrLoc](auto colIter) mutable {
+            nnzArrLoc[colIter.colid()] = colIter.nnz();
+        });
+
+        // Reduce across each processor column to get column counts on processor row 0
+        std::vector<IT> nnzArrAggregate(locNcolsExact);
+        MPI_Reduce(nnzArrLoc.data(), nnzArrAggregate.data(), nnzArrLoc.size(),
+                    MPIType<IT>(), M.getcommgrid()->GetColWorld());
+
+        //Now, gatherv onto rank 0 across row 0 of processor grid
+        //Note that gatherv is needed instead of gather because the last processor could have edge columns
+
+        // Vector storing nonzeros of all ranks 
+        std::vector<IT> nnzArrGlob(M.ncols);
+
+        // Get recvcounts
+        std::vector<IT> recvCounts(worldSize);
+        IT locRecvCount = locNcols;
+        MPI_Gather((void*)(&locRecvCount), 1, MPIType<IT>(), 
+                        recvCounts.data(), 1, MPIType<IT>(), 
+                        0, M.getcommgrid()->GetRowWorld());
+
+        // Get displacements
+        // This should be the same as recvcounts, since we want to displace each received array
+        // by its size
+        std::vector<IT> * displs = &recvCounts;
+
+        // Gatherv to populate rank 0 array for all columns
+        MPI_Gatherv(nnzArrLoc.data(), nnzArrLoc.size(), MPIType<IT>(),
+                    nnzArrGlob.data(), recvCounts.data(), displs->data(), MPIType<IT>(),
+                    0, M.getcommgrid()->GetRowWorld());
+
+        return nnzArrGlob;
+
+    }
+
+    /* Initialize array containing nnz per row on each processor, then gather on processor 0 */
+    std::vector<IT> NnzArrRow(SpParMat3D<IT,NT,DER>& M) {
+    
+    }
 
     
     upcxx::global_ptr<IT> InitNnzArrRow(SpParMat3D<IT,NT,DER>& M) {
@@ -199,9 +247,9 @@ public:
         DEBUG_LOG("Local rows exact: " + std::to_string(locNrowsExact));
         DEBUG_LOG("Local cols exact: " + std::to_string(locNcolsExact));
 
-		IT locNnz3D = SumLocalNnzRange(COL_SPLIT, firstRow, lastRow,
-										firstCol, lastCol,
-										procCols2D, useConjFut);
+        IT locNnz3D = SumLocalNnzRange(COL_SPLIT, firstRow, lastRow,
+                                        firstCol, lastCol,
+                                        procCols2D, useConjFut);
 
 
         DEBUG_LOG("Nnz 3d A: " + std::to_string(locNnz3D));
@@ -218,7 +266,7 @@ public:
         if (totalProcs==1) return locNnz;
         if (rank>=totalProcs) return 0; //return if this rank isn't part of the 3D grid
 
-		bool useConjFut = DecideConjFut(ppn, nodes, layers);
+        bool useConjFut = DecideConjFut(ppn, nodes, layers);
 
         /* Info about currently, actually formed 2D processor grid */
         const int totalProcs2D = jobPtr->totalTasks;
@@ -259,9 +307,9 @@ public:
         DEBUG_LOG("Local rows exact: " + std::to_string(locNrowsExact));
         DEBUG_LOG("Local cols exact: " + std::to_string(locNcolsExact));
 
-		IT locNnz3D = SumLocalNnzRange(ROW_SPLIT, firstRow, lastRow,
-										firstCol, lastCol,
-										procRows2D, useConjFut); 
+        IT locNnz3D = SumLocalNnzRange(ROW_SPLIT, firstRow, lastRow,
+                                        firstCol, lastCol,
+                                        procRows2D, useConjFut); 
 
         DEBUG_LOG("Nnz 3d B: " + std::to_string(locNnz3D));
 
@@ -271,23 +319,23 @@ public:
 
     
     IT SumLocalNnzRange(SPLIT split, 
-						IT firstRow, IT lastRow,
-						IT firstCol, IT lastCol,
-						int procDim2D,
-						bool useConjFut) 
+                        IT firstRow, IT lastRow,
+                        IT firstCol, IT lastCol,
+                        int procDim2D,
+                        bool useConjFut) 
     {
         IT locNnz3D = 0;
         auto addNnz = [&locNnz3D](IT colNnz)mutable{locNnz3D+=colNnz;};
-		
-		IT outerStart;
-	    IT outerEnd;
+        
+        IT outerStart;
+        IT outerEnd;
         IT innerStart;
         IT innerEnd;
         IT offset;
         IT locDimMod;
         distArr * nnzArr;
         
-		if (split==ROW_SPLIT) {
+        if (split==ROW_SPLIT) {
             outerStart = firstRow;
             outerEnd = lastRow;
             innerStart = firstCol;
@@ -313,7 +361,7 @@ public:
 
         //TODO: Message aggregation
         //TODO: Should probably avoid fetching rows with no nonzeros
-		
+        
         for (IT k = outerStart; k<outerEnd; k++) {
             for (IT l = innerStart; l<innerEnd; l+=offset) {
                 int targetRank = TargetRank(k,l, procDim2D, split);
@@ -333,15 +381,15 @@ public:
         }
         
         //Handle edge case
-		bool edge;
-		IT edgeEnd;
-		if (split==ROW_SPLIT) {
-			edge = (lastRow==(nrows / procDim2D)*procDim2D);
-			edgeEnd = nrows;
-		} else if (split==COL_SPLIT) {
-			edge = (lastCol==(ncols / procDim2D)*procDim2D);
-			edgeEnd = ncols;
-		}	
+        bool edge;
+        IT edgeEnd;
+        if (split==ROW_SPLIT) {
+            edge = (lastRow==(nrows / procDim2D)*procDim2D);
+            edgeEnd = nrows;
+        } else if (split==COL_SPLIT) {
+            edge = (lastCol==(ncols / procDim2D)*procDim2D);
+            edgeEnd = ncols;
+        }   
 
         if (edge) {
             for (IT k = outerEnd; k<edgeEnd; k++) {
@@ -365,7 +413,7 @@ public:
 
         if (useConjFut) fetchFuts.wait();
 
-		return locNnz3D;
+        return locNnz3D;
     }
 
 
@@ -461,8 +509,8 @@ private:
 
     SPLIT split;    
 
-    distArr * nnzArrCol;
-    distArr * nnzArrRow;
+    std::vector<IT> nnzArrCol;
+    std::vector<IT> nnzArrRow;
 
 };
 
