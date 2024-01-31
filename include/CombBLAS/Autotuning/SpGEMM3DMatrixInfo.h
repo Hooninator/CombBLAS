@@ -319,9 +319,6 @@ public:
           //  nnzArr = this->nnzArrColDist;
         }
 
-#ifdef DEBUG
-        std::map<int,int> targets;
-#endif
 
 
         //TODO: Message aggregation
@@ -329,10 +326,6 @@ public:
         
         for (IT k = outerStart; k<outerEnd; k++) {
             for (IT l = innerStart; l<innerEnd; l+=offset) {
-#ifdef DEBUG
-                targets.emplace(targetRank, 0);
-                targets[targetRank] += 1;
-#endif
             }
         }
         
@@ -351,10 +344,6 @@ public:
             for (IT k = outerEnd; k<edgeEnd; k++) {
                 for (IT l = innerStart; l<outerStart; l+=offset) {
                     int targetRank = TargetRank(k,l, procDim2D, split);
-#ifdef DEBUG
-                    targets.emplace(targetRank, 0);
-                    targets[targetRank] += 1;
-#endif
                 }
             }
         }
