@@ -64,36 +64,71 @@ public:
             nnzArrLoc[colIter.colid()] = colIter.nnz();
         }
 
-        // Reduce across each processor column to get column counts on processor row 0
-        std::vector<IT> nnzArrAggregate(locNcolsExact);
-        MPI_Reduce(nnzArrLoc.data(), nnzArrAggregate.data(), nnzArrLoc.size(),
-                    MPIType<IT>(), MPI_SUM, 0, M.getcommgrid()->GetCommGridLayer()->GetColWorld());
-
-        //Now, gatherv onto rank 0 across row 0 of processor grid
-        //Note that gatherv is needed instead of gather because the last processor could have edge columns
-
-        // Vector storing nonzeros of all ranks 
-        std::vector<IT> nnzArrGlob(M.getncol());
+        // Need to do a gatherv across each processor column
+        // Then you have a sqrt(P)*locNcols matrix stored in row major order on each processor in the top row of the grid 
+        // where m[i,j] = nnz in partition of column j on processor rank i in the column world.
+        // The columns of the matrix are distributed across the top row of the processor grid
+        // Note that gatherv is needed instead of gather because the last processor could have edge columns
 
         // Get recvcounts
         // int could => overflow... but MPI
-        std::vector<int> recvCounts(worldSize);
+        std::vector<int> recvCounts(RoundedSqrt<int,int>(worldSize));
         int locRecvCount = static_cast<int>(locNcols);
-        MPI_Gather((void*)(&locRecvCount), 1, MPIType<IT>(), 
-                        recvCounts.data(), 1, MPIType<IT>(), 
-                        0, M.getcommgrid()->GetCommGridLayer()->GetRowWorld());
+        MPI_Gather((void*)(&locRecvCount), 1, MPI_INT, 
+                        (void*)recvCounts.data(), 1, MPI_INT, 
+                        0, M.getcommgrid()->GetCommGridLayer()->GetColWorld());
+
+#ifdef DEBUG
+        debugPtr->Log("Recv counts");
+        debugPtr->LogVec(recvCounts); 
+#endif
 
         // Get displacements
         // This should be the same as recvcounts, since we want to displace each received array
         // by its size
         std::vector<int> * displs = &recvCounts;
 
-        // Gatherv to populate rank 0 array for all columns
-        MPI_Gatherv(nnzArrLoc.data(), nnzArrLoc.size(), MPIType<IT>(),
-                    nnzArrGlob.data(), recvCounts.data(), displs->data(), MPIType<IT>(),
-                    0, M.getcommgrid()->GetCommGridLayer()->GetRowWorld());
+        // Gatherv to populate processor row 0 with matrices described in above comment 
+        std::vector<IT> nnzMatrix(RoundedSqrt<int,int>(worldSize)*locNcolsExact);
+        MPI_Gatherv((void*)nnzArrLoc.data(), nnzArrLoc.size(), MPIType<IT>(),
+                    (void*)nnzMatrix.data(), recvCounts.data(), displs->data(), MPIType<IT>(),
+                    0, M.getcommgrid()->GetCommGridLayer()->GetColWorld());
+        
+#ifdef DEBUG
+        debugPtr->Log("nnzMatrix");
+        debugPtr->LogVec(nnzMatrix); 
+#endif
 
-        return nnzArrGlob;
+        // Now, bring the whole matrix to rank 0
+        // This should be thought of as a 3D tensor of size (sqrt(P),locNcols,sqrt(P)). 
+        // m[i,j,k] = nnz on partition of column j + k*locNcols on processor rank i in the column world
+        // JB: This does reduce communication, but it forces the nnz computation to be serial...which is worse?
+        // TODO: if tensor can't fit on single node memory, then keep it distributed
+
+        locRecvCount = static_cast<int>(RoundedSqrt<int,int>(worldSize)*locNcolsExact);
+        recvCounts.clear();
+        MPI_Gather((void*)(&locRecvCount), 1, MPI_INT,
+                    (void*)recvCounts.data(), 1, MPI_INT,
+                    0, M.getcommgrid()->GetCommGridLayer()->GetRowWorld());
+        
+#ifdef DEBUG
+        debugPtr->Log("Recv counts");
+        debugPtr->LogVec(recvCounts); 
+#endif
+
+        displs = &recvCounts;
+
+        std::vector<IT> nnzTensor(RoundedSqrt<int,int>(worldSize)*ncols);
+        MPI_Gatherv((void*)nnzMatrix.data(), nnzMatrix.size(), MPIType<IT>(),
+                    (void*)nnzTensor.data(), recvCounts.data(), displs->data(), MPIType<IT>(),
+                    0, M.getcommgrid()->GetCommGridLayer()->GetRowWorld());
+        
+#ifdef DEBUG
+        debugPtr->Log("nnzTensor");
+        debugPtr->LogVec(recvCounts); 
+#endif
+
+        return nnzTensor;
 
     }
 

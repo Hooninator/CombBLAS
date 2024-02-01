@@ -6,7 +6,7 @@
 #include <fstream>
 #include <iostream>
 #include <string>
-
+#include <algorithm>
 
 namespace combblas {
 namespace autotuning {
@@ -27,6 +27,13 @@ public:
     template <typename T>
     void Log(T msg) {
         if (rank==0 || _allRanks) ofs<<msg<<std::endl;
+    }
+
+    template <typename T>
+    void LogVec(std::vector<T>& v) {
+        if (rank==0||_allRanks) {
+            std::for_each(v.begin(), v.end(), [this](T& elem) {this->ofs<<elem<<std::endl;});
+        }
     }
 
     ~Logger(){ofs.close();}
