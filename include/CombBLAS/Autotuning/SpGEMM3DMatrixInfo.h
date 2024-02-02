@@ -63,6 +63,11 @@ public:
         for (auto colIter = M.seqptr()->begcol(); colIter!=M.seqptr()->endcol(); colIter++) {
             nnzArrLoc[colIter.colid()] = colIter.nnz();
         }
+        
+#ifdef DEBUG
+        debugPtr->Log("nnzArrLoc");
+        debugPtr->LogVec(nnzArrLoc);
+#endif
 
         // Need to do a gatherv across each processor column
         // Then you have a sqrt(P)*locNcols matrix stored in row major order on each processor in the top row of the grid 
@@ -72,8 +77,9 @@ public:
 
         // Get recvcounts
         // int could => overflow... but MPI
+        // TODO: Replace this (and the others) with MPI_IN_PLACE
         std::vector<int> recvCounts(RoundedSqrt<int,int>(worldSize));
-        int locRecvCount = static_cast<int>(locNcols);
+        int locRecvCount = static_cast<int>(locNcolsExact);
         MPI_Gather((void*)(&locRecvCount), 1, MPI_INT, 
                         (void*)recvCounts.data(), 1, MPI_INT, 
                         0, M.getcommgrid()->GetCommGridLayer()->GetColWorld());
@@ -125,7 +131,7 @@ public:
         
 #ifdef DEBUG
         debugPtr->Log("nnzTensor");
-        debugPtr->LogVec(recvCounts); 
+        debugPtr->LogVec(nnzTensor); 
 #endif
 
         return nnzTensor;
