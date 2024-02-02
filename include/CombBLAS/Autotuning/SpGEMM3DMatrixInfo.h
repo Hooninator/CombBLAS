@@ -20,138 +20,178 @@ public:
     enum SPLIT {COL_SPLIT, ROW_SPLIT} typedef SPLIT;
 
     //NOTE: loc* are values for the actual 2D processor grid
-    SpGEMM3DMatrixInfo(SpParMat3D<IT,NT,DER>& M):
-        nnz(M.getnnz()), ncols(M.getncol()), nrows(M.getnrow()),
-        locNnz(M.seqptr()->getnnz()), 
-        locNcols(M.getncol() / RoundedSqrt<IT,IT>(jobPtr->totalTasks)), 
-        locNrows(M.getnrow() / RoundedSqrt<IT,IT>(jobPtr->totalTasks)),
-        locNcolsExact(M.seqptr()->getncol()),
-        locNrowsExact(M.seqptr()->getnrow())
+    SpGEMM3DMatrixInfo(SpParMat3D<IT,NT,DER>& Mat):
+        nnz(Mat.getnnz()), ncols(Mat.getncol()), nrows(Mat.getnrow()),
+        locNnz(Mat.seqptr()->getnnz()), 
+        locNcols(Mat.getncol() / RoundedSqrt<IT,IT>(worldSize)), 
+        locNrows(Mat.getnrow() / RoundedSqrt<IT,IT>(worldSize)),
+        locNcolsExact(Mat.seqptr()->getncol()),
+        locNrowsExact(Mat.seqptr()->getnrow())
      {
         
         INIT_TIMER();
 
         density = static_cast<float>(nnz) / static_cast<float>(ncols*nrows);
-        split = M.isColSplit() ? COL_SPLIT : ROW_SPLIT;
+        split = Mat.isColSplit() ? COL_SPLIT : ROW_SPLIT;
         
         START_TIMER();
 
-        nnzArrCol = NnzArrCol(M); 
+        nnzTensorCol = NnzTensor(Mat); 
 
-        END_TIMER("nnzArrCol Init Time: ");
+        END_TIMER("nnzTensorCol Init Time: ");
 
         START_TIMER();
 
+        nnzTensorRow = NnzTensor(Mat);
 
-        END_TIMER("nnzArrRow Init Time: ");
+        END_TIMER("nnzTensorRow Init Time: ");
 
         //Synchronize to ensure all processes have activated the  dist_object
         MPI_Barrier(MPI_COMM_WORLD);
         
     }
 
-
-
-    /* Initialize array containing nnz per column on each processor, then gather on processor 0  */
-    std::vector<IT> NnzArrCol(SpParMat3D<IT,NT,DER>& M) {
-        
-        // Make local vector, init to zero
-        std::vector<IT> nnzArrLoc(locNcolsExact);
-        std::fill(nnzArrLoc.begin(), nnzArrLoc.end(), 0);
-        
-        // Init local columns
-        for (auto colIter = M.seqptr()->begcol(); colIter!=M.seqptr()->endcol(); colIter++) {
-            nnzArrLoc[colIter.colid()] = colIter.nnz();
-        }
-        
-#ifdef DEBUG
-        debugPtr->Log("nnzArrLoc");
-        debugPtr->LogVec(nnzArrLoc);
-#endif
-
-        // Need to do a gatherv across each processor column
-        // Then you have a sqrt(P)*locNcols matrix stored in row major order on each processor in the top row of the grid 
-        // where m[i,j] = nnz in partition of column j on processor rank i in the column world.
-        // The columns of the matrix are distributed across the top row of the processor grid
-        // Note that gatherv is needed instead of gather because the last processor could have edge columns
-
-        // Get recvcounts
-        // int could => overflow... but MPI
-        // TODO: Replace this (and the others) with MPI_IN_PLACE
-        std::vector<int> recvCounts(RoundedSqrt<int,int>(worldSize));
-        int locRecvCount = static_cast<int>(locNcolsExact);
-        MPI_Gather((void*)(&locRecvCount), 1, MPI_INT, 
-                        (void*)recvCounts.data(), 1, MPI_INT, 
-                        0, M.getcommgrid()->GetCommGridLayer()->GetColWorld());
-
-#ifdef DEBUG
-        debugPtr->Log("Recv counts");
-        debugPtr->LogVec(recvCounts); 
-#endif
-
-        // Get displacements
-        // This should be the same as recvcounts, since we want to displace each received array
-        // by its size
-        std::vector<int> * displs = &recvCounts;
-
-        // Gatherv to populate processor row 0 with matrices described in above comment 
-        std::vector<IT> nnzMatrix(RoundedSqrt<int,int>(worldSize)*locNcolsExact);
-        MPI_Gatherv((void*)nnzArrLoc.data(), nnzArrLoc.size(), MPIType<IT>(),
-                    (void*)nnzMatrix.data(), recvCounts.data(), displs->data(), MPIType<IT>(),
-                    0, M.getcommgrid()->GetCommGridLayer()->GetColWorld());
-        
-#ifdef DEBUG
-        debugPtr->Log("nnzMatrix");
-        debugPtr->LogVec(nnzMatrix); 
-#endif
-
-        // Now, bring the whole matrix to rank 0
-        // This should be thought of as a 3D tensor of size (sqrt(P),locNcols,sqrt(P)). 
-        // m[i,j,k] = nnz on partition of column j + k*locNcols on processor rank i in the column world
-        // JB: This does reduce communication, but it forces the nnz computation to be serial...which is worse?
-        // TODO: if tensor can't fit on single node memory, then keep it distributed
-
-        locRecvCount = static_cast<int>(RoundedSqrt<int,int>(worldSize)*locNcolsExact);
-        recvCounts.clear();
-        MPI_Gather((void*)(&locRecvCount), 1, MPI_INT,
-                    (void*)recvCounts.data(), 1, MPI_INT,
-                    0, M.getcommgrid()->GetCommGridLayer()->GetRowWorld());
-        
-#ifdef DEBUG
-        debugPtr->Log("Recv counts");
-        debugPtr->LogVec(recvCounts); 
-#endif
-
-        displs = &recvCounts;
-
-        std::vector<IT> nnzTensor(RoundedSqrt<int,int>(worldSize)*ncols);
-        MPI_Gatherv((void*)nnzMatrix.data(), nnzMatrix.size(), MPIType<IT>(),
-                    (void*)nnzTensor.data(), recvCounts.data(), displs->data(), MPIType<IT>(),
-                    0, M.getcommgrid()->GetCommGridLayer()->GetRowWorld());
-        
-#ifdef DEBUG
-        debugPtr->Log("nnzTensor");
-        debugPtr->LogVec(nnzTensor); 
-#endif
-
-        return nnzTensor;
-
-    }
-
-    /* Initialize array containing nnz per row on each processor, then gather on processor 0 */
-    std::vector<IT> NnzArrRow(SpParMat3D<IT,NT,DER>& M) {
     
-        std::vector<IT> locNnzVec(locNrowsExact);
-        for (auto colIter = M.seqptr()->begcol(); colIter != M.seqptr()->endcol(); colIter++) {
-            // Iterate through each element of this column and add it to the nonzero array
-            for (auto nzIter = M.seqptr()->begnz(colIter); nzIter != M.seqptr()->endnz(colIter); nzIter++) {
-                locNnzVec[nzIter.rowid()] += 1;
+    /* 3D tensor stored in row major order containing nnz in partition of 2D distributed matrix */
+    class NnzTensor {
+    public:
+        
+        NnzTensor(){}
+
+        NnzTensor(std::vector<IT> tensor, IT M, IT N, IT K):
+            tensor(tensor), M(M),N(N),K(N)
+        {
+        }
+
+
+        NnzTensor(SpParMat3D<IT,NT,DER>& Mat) {
+
+           IT locDimExact = Mat.isColSplit() ? Mat.seqptr()->getncol() : Mat.seqptr()->getnrow(); 
+
+           Mat.isColSplit() ? tensor = NnzTensorCol(Mat, locDimExact) : 
+                              tensor = NnzTensorRow(Mat, locDimExact);
+
+           M = RoundedSqrt<int,int>(worldSize);
+           N = (Mat.getncol() / RoundedSqrt<IT,IT>(worldSize));
+           K = M;
+
+        }
+
+
+        IT Index(IT i, IT j, IT k) {
+            return tensor[i*N + j + k*(M*N)];
+        }
+
+
+        /* Initialize array containing nnz per column on each processor, then gather on processor 0  */
+        std::vector<IT> NnzTensorCol(SpParMat3D<IT,NT,DER>& Mat, IT locNcolsExact) {
+            
+            // Make local vector, init to zero
+            std::vector<IT> nnzArrLoc(locNcolsExact);
+            std::fill(nnzArrLoc.begin(), nnzArrLoc.end(), 0);
+            
+            // Init local columns
+            for (auto colIter = Mat.seqptr()->begcol(); colIter!=Mat.seqptr()->endcol(); colIter++) {
+                nnzArrLoc[colIter.colid()] = colIter.nnz();
+            }
+            
+#ifdef DEBUG
+            debugPtr->Log("nnzArrLoc");
+            debugPtr->LogVec(nnzArrLoc);
+#endif
+
+            // Need to do a gatherv across each processor column
+            // Then you have a sqrt(P)*locNcols matrix stored in row major order on each processor in the top row of the grid 
+            // where m[i,j] = nnz in partition of column j on processor rank i in the column world.
+            // The columns of the matrix are distributed across the top row of the processor grid
+            // Note that gatherv is needed instead of gather because the last processor could have edge columns
+
+            // Get recvcounts
+            // int could => overflow... but MPI
+            // TODO: Replace this (and the others) with MPI_IN_PLACE
+            std::vector<int> recvCounts(RoundedSqrt<int,int>(worldSize));
+            int locRecvCount = static_cast<int>(locNcolsExact);
+            MPI_Gather((void*)(&locRecvCount), 1, MPI_INT, 
+                            (void*)recvCounts.data(), 1, MPI_INT, 
+                            0, Mat.getcommgrid()->GetCommGridLayer()->GetColWorld());
+
+#ifdef DEBUG
+            debugPtr->Log("Recv counts");
+            debugPtr->LogVec(recvCounts); 
+#endif
+
+            // Get displacements
+            // This should be the same as recvcounts, since we want to displace each received array
+            // by its size
+            std::vector<int> * displs = &recvCounts;
+
+            // Gatherv to populate processor row 0 with matrices described in above comment 
+            std::vector<IT> nnzMatrix(RoundedSqrt<int,int>(worldSize)*locNcolsExact);
+            MPI_Gatherv((void*)nnzArrLoc.data(), nnzArrLoc.size(), MPIType<IT>(),
+                        (void*)nnzMatrix.data(), recvCounts.data(), displs->data(), MPIType<IT>(),
+                        0, Mat.getcommgrid()->GetCommGridLayer()->GetColWorld());
+            
+#ifdef DEBUG
+            debugPtr->Log("nnzMatrix");
+            debugPtr->LogVec(nnzMatrix); 
+#endif
+
+            // Now, bring the whole matrix to rank 0
+            // This should be thought of as a 3D tensor of size (sqrt(P),locNcols,sqrt(P)). 
+            // m[i,j,k] = nnz on partition of column j + k*locNcols on processor rank i in the column world
+            // JB: This does reduce communication, but it forces the nnz computation to be serial...which is worse?
+            // TODO: if tensor can't fit on single node memory, then keep it distributed
+
+            locRecvCount = static_cast<int>(RoundedSqrt<int,int>(worldSize)*locNcolsExact);
+            recvCounts.clear();
+            MPI_Gather((void*)(&locRecvCount), 1, MPI_INT,
+                        (void*)recvCounts.data(), 1, MPI_INT,
+                        0, Mat.getcommgrid()->GetCommGridLayer()->GetRowWorld());
+            
+#ifdef DEBUG
+            debugPtr->Log("Recv counts");
+            debugPtr->LogVec(recvCounts); 
+#endif
+
+            displs = &recvCounts;
+
+            std::vector<IT> nnzTensor(RoundedSqrt<int,int>(worldSize)*Mat.getncol());
+            MPI_Gatherv((void*)nnzMatrix.data(), nnzMatrix.size(), MPIType<IT>(),
+                        (void*)nnzTensor.data(), recvCounts.data(), displs->data(), MPIType<IT>(),
+                        0, Mat.getcommgrid()->GetCommGridLayer()->GetRowWorld());
+            
+#ifdef DEBUG
+            debugPtr->Log("nnzTensor");
+            debugPtr->LogVec(nnzTensor); 
+#endif
+
+            return nnzTensor;
+
+        }
+
+
+        /* Initialize array containing nnz per row on each processor, then gather on processor 0 */
+        std::vector<IT> NnzTensorRow(SpParMat3D<IT,NT,DER>& Mat, IT locNrowsExact) {
+        
+            std::vector<IT> locNnzVec(locNrowsExact);
+            for (auto colIter = Mat.seqptr()->begcol(); colIter != Mat.seqptr()->endcol(); colIter++) {
+                // Iterate through each element of this column and add it to the nonzero array
+                for (auto nzIter = Mat.seqptr()->begnz(colIter); nzIter!=Mat.seqptr()->endnz(colIter); nzIter++) {
+                    locNnzVec[nzIter.rowid()] += 1;
+                }
             }
 
+            return locNnzVec;
         }
 
-        return locNnzVec;
-    }
+
+        private:
+            std::vector<IT> tensor;
+            IT M, N, K;
+
+        };
+
+
 
 
     /* Approximate local nnz using matrix density
@@ -349,7 +389,7 @@ public:
             innerEnd = lastCol;
             offset = this->locNcols;
             locDimMod = this->locNrows;
-        //    nnzArr = this->nnzArrRowDist;
+        //    nnzArr = this->nnzTensorRowDist;
         } else if (split==COL_SPLIT) {
             outerStart = firstCol;
             outerEnd = lastCol;
@@ -357,7 +397,7 @@ public:
             innerEnd = lastRow;
             offset = this->locNrows;
             locDimMod = this->locNcols;
-          //  nnzArr = this->nnzArrColDist;
+          //  nnzArr = this->nnzTensorColDist;
         }
 
 
@@ -426,6 +466,7 @@ public:
     }
 
 
+
     IT ComputeMsgSize(const int locNnz) {
         return locNnz * GetNzvalSize() +
                 locNnz * GetIndexSize() +
@@ -470,8 +511,8 @@ private:
 
     SPLIT split;    
 
-    std::vector<IT> nnzArrCol;
-    std::vector<IT> nnzArrRow;
+    NnzTensor nnzTensorCol;
+    NnzTensor nnzTensorRow;
 
 };
 
