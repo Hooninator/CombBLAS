@@ -16,6 +16,8 @@
 #include <string>
 #include <algorithm>
 #include <numeric>
+#include <utility>
+#include <tuple>
 //#include <upcxx/upcxx.hpp>
 
 #include "CombBLAS/SpMat.h"
@@ -42,7 +44,7 @@
 
 
 #define PROFILE 
-//#define DEBUG
+#define DEBUG
 
 #define ASSERT(condition, message) \
     do { \
@@ -222,6 +224,19 @@ inline U RoundedSqrt(T n) {return static_cast<U>(sqrt(n));}
 template <typename T=float>
 inline T FloatDiv(T a, T b) {return static_cast<T>(a) / static_cast<T>(b);}
 
+template <typename... T>
+std::string TupleStr(const std::tuple<T...>& tuple) {
+
+    std::stringstream ss;
+
+    ss<<"(";
+    std::apply([&ss](const auto&... elem) {
+        ((ss<<elem<<","), ...);
+    }, tuple);
+    ss<<")"<<std::endl;
+    
+    return ss.str();
+}
 
 }//autotuning
 }//combblas

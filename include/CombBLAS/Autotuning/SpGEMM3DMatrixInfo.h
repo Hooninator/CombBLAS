@@ -61,12 +61,13 @@ public:
         auto colWorld = Mat.getcommgrid()->GetCommGridLayer()->GetColWorld();
         auto rowWorld = Mat.getcommgrid()->GetCommGridLayer()->GetRowWorld();
         auto gridWorld = Mat.getcommgrid()->GetCommGridLayer()->GetWorld();
+
         auto colRank = Mat.getcommgrid()->GetCommGridLayer()->GetRankInProcCol();
         auto rowRank = Mat.getcommgrid()->GetCommGridLayer()->GetRankInProcRow();
         
-        std::vector<IT> nnzArrLoc;
-        std::vector<IT> colInds;
-        std::vector<IT> rowInds;
+        std::vector<IT> nnzArrLoc(0);
+        std::vector<IT> colInds(0);
+        std::vector<IT> rowInds(0);
         
         // Init local data
         for (auto colIter = Mat.seqptr()->begcol(); colIter!=Mat.seqptr()->endcol(); colIter++) {
@@ -76,18 +77,26 @@ public:
         }
         
 #ifdef DEBUG
+        debugPtr->Log("sizes: " +std::to_string(nnzArrLoc.size())+","+std::to_string(colInds.size())+","+std::to_string(rowInds.size()));
         debugPtr->Log("nnzArrLoc");
         debugPtr->LogVec(nnzArrLoc);
 #endif
 
-        ASSERT(nnzArrLoc.size()==colInds.size()==rowInds.size(), "");
+        ASSERT((nnzArrLoc.size()==colInds.size()) && (colInds.size()==rowInds.size()), 
+                "Array sizes are not the same on rank " + std::to_string(rank));
+
 
         // TODO: Replace this (and the others) with MPI_IN_PLACE
         std::vector<int> recvCounts(worldSize);
         int locRecvCount = static_cast<int>(nnzArrLoc.size());
+#ifdef DEBUG
+        debugPtr->Log("locrecvcount: " + std::to_string(locRecvCount));
+#endif
         MPI_Gather((void*)(&locRecvCount), 1, MPI_INT, 
                         (void*)recvCounts.data(), 1, MPI_INT, 
-                        0, gridWorld);
+                        0, MPI_COMM_WORLD);
+
+        MPI_Barrier(MPI_COMM_WORLD);
 
 #ifdef DEBUG
         debugPtr->Log("Recv counts");
@@ -110,15 +119,15 @@ public:
         std::vector<IT> rowsGlob(globRecvSize);
         MPI_Gatherv((void*)nnzArrLoc.data(), nnzArrLoc.size(), MPIType<IT>(),
                     (void*)nnzGlob.data(), recvCounts.data(), displs->data(), MPIType<IT>(),
-                    0, gridWorld);
+                    0, MPI_COMM_WORLD);
 
         MPI_Gatherv((void*)colInds.data(), colInds.size(), MPIType<IT>(),
                     (void*)colsGlob.data(), recvCounts.data(), displs->data(), MPIType<IT>(),
-                    0, gridWorld);
+                    0, MPI_COMM_WORLD);
 
         MPI_Gatherv((void*)rowInds.data(), rowInds.size(), MPIType<IT>(),
                     (void*)rowsGlob.data(), recvCounts.data(), displs->data(), MPIType<IT>(),
-                    0, gridWorld);
+                    0, MPI_COMM_WORLD);
         
         std::vector<std::tuple<IT,IT,IT>> nnzTuples(globRecvSize);
 
@@ -127,8 +136,16 @@ public:
         }
 
 #ifdef DEBUG
+        // Make sure we don't mutate the tuples
         debugPtr->Log("nnzTuples");
-        debugPtr->LogVec(nnzTuples); 
+        std::vector<std::string> nnzTuplesDebug(nnzTuples.size());
+        std::transform(nnzTuples.begin(), nnzTuples.begin(), nnzTuplesDebug.begin(),
+                            [](std::tuple<IT,IT,IT>& t){return TupleStr(t);});
+        debugPtr->LogVec(nnzTuplesDebug); 
+#endif
+
+#ifdef DEBUG
+        debugPtr->Log("Making nnz matrix on rank 0");
 #endif
 
         // nnzMatrix[i,j] = nnz on row block i of column j
@@ -137,6 +154,12 @@ public:
         nnzMatrix.Create(globRecvSize, Mat.getcommgrid()->GetCommGridLayer()->GetGridRows(),
                                         Mat.getcommgrid()->GetCommGridLayer()->GetGridRows(),
                                         nnzTuples.data());
+
+#ifdef DEBUG
+        debugPtr->Log("Done with nnz col");
+#endif
+
+        MPI_Barrier(MPI_COMM_WORLD);
 
         return nnzMatrix;
 
