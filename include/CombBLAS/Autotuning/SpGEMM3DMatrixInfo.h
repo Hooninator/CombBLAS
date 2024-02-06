@@ -69,20 +69,10 @@ public:
 
         START_TIMER();
 
-        auto colWorld = Mat.getcommgrid()->GetCommGridLayer()->GetColWorld();
-        auto rowWorld = Mat.getcommgrid()->GetCommGridLayer()->GetRowWorld();
-        auto gridWorld = Mat.getcommgrid()->GetCommGridLayer()->GetWorld();
-
-        auto colRank = Mat.getcommgrid()->GetCommGridLayer()->GetRankInProcCol();
-        auto rowRank = Mat.getcommgrid()->GetCommGridLayer()->GetRankInProcRow();
-
-        MPI_Datatype MPI_triple;
-        MPI_Type_contiguous(sizeof(std::tuple<IT,IT,IT>), MPI_CHAR, &MPI_triple);
-        MPI_Type_commit(&MPI_triple);
-
         std::tuple<IT,IT,IT> * locTuples = new std::tuple<IT,IT,IT>[locNrowsExact];
 
-        
+        int colRank = Mat.getcommgrid()->GetCommGridLayer()->GetRankInProcCol();
+        int rowRank = Mat.getcommgrid()->GetCommGridLayer()->GetRankInProcRow();
         
         // Init local data
         int locTupleSize = 0;
@@ -93,15 +83,23 @@ public:
             }
         }
 
+        END_TIMER("Time for local tuple construction: ");
+
+#ifdef DEBUG
+        debugPtr->Log("locNnzTuples");
+        for (int i=0; i<locTupleSize; i++) {
+            debugPtr->Log(std::to_string(i) + ":" + TupleStr(locTuples[i]));
+        }
+#endif
+
+        START_TIMER();
 
         NnzMat * nnzMat = new NnzMat(Mat.getcommgrid()->GetCommGridLayer()->GetGridRows(),
                                 Mat.getncol(),
                                 locTupleSize,
-                                locTuples, true);
+                                locTuples, false);
 
         END_TIMER("Time for SpMatCol construction: ");
-
-        MPI_Barrier(MPI_COMM_WORLD);
 
         return nnzMat;
 
@@ -159,7 +157,7 @@ public:
             case ROW_SPLIT:
             {
                 
-                //locNnz = ComputeLocalNnzRowSplit(ppn,nodes,layers);
+                locNnz = ComputeLocalNnzRowSplit(ppn,nodes,layers);
                 break;
             }
             default:
@@ -225,7 +223,7 @@ public:
             int j = colIter.colid();
             for (auto nzIter = nnzMatCol->begnz(colIter); nzIter!=nnzMatCol->endnz(colIter); nzIter++) {
                 int i = nzIter.rowid();
-                int owner = GetOwner3DColSplit(ppn, nodes, layers, i, j);
+                int owner = GetOwner3DColSplit(ppn, nodes, layers, i*locNrows, j);
                 nnzArr[owner] += nzIter.value();
             }
         }
@@ -261,14 +259,14 @@ public:
         const IT locNcols3D = locNcols * (procCols2D/gridCols)/layers;
         const IT locNrows3D = locNrows * (procRows2D/gridRows);
 
-        const int prow = std::min(static_cast<IT>(i / locNrows3D), static_cast<IT>(gridRows));
-        const int pcol = std::min(static_cast<IT>(j / locNcols3D*layers), static_cast<IT>(gridCols));
-        const int player = std::min(static_cast<IT>((j / locNcols3D)%layers), static_cast<IT>(layers));
+        const int prow = std::min(static_cast<IT>(i / locNrows3D), static_cast<IT>(gridRows-1));
+        const int pcol = std::min(static_cast<IT>(j / locNcols3D*layers), static_cast<IT>(gridCols-1));
+        const int player = std::min(static_cast<IT>((j / locNcols3D)%layers), static_cast<IT>(layers-1));
 
 #ifdef DEBUG
         debugPtr->Log("locNcols3D: " + std::to_string(locNcols3D));
         debugPtr->Log("locNrows3D: " + std::to_string(locNrows3D));
-        debugPtr->Log("(i: " + std::to_string(i) + ", j: " + std::to_string(j));
+        debugPtr->Log("(i: " + std::to_string(i) + ", j: " + std::to_string(j) + ")");
         debugPtr->Log("(prow: " + std::to_string(prow) + ", pcol: " + std::to_string(pcol) + ", player: " + std::to_string(player) + ")");
 #endif
 
