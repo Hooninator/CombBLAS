@@ -87,20 +87,31 @@ public:
 #ifdef PROFILE
         auto stime1 = MPI_Wtime();
 #endif
+        
+        double finalTime = 0;
 
-        IT localNnzApprox = Minfo.ComputeLocalNnz(params.GetPPN(), params.GetNodes(), params.GetLayers());
-        IT msgSize = Minfo.ComputeMsgSize(localNnzApprox);
+        std::vector<IT> localNnzApprox = Minfo.ComputeNnzArr(params.GetPPN(), params.GetNodes(), params.GetLayers());
+        for (auto const& nnz : localNnzApprox) {
 
-        CommOpts * opts = new CommOpts{
-            //gridSize <= params.GetCoresPerNode() ? true : false //intranode
-            false
-        };
-        CommInfo<IT> * info = MakeBcastCommInfo(params.GetGridDim(), params.GetTotalProcs(), msgSize); 
+            IT msgSize = Minfo.ComputeMsgSize(nnz);
 
-        double singleBcastTime = bcastModel->ComputeTime(info, opts);
+            CommOpts * opts = new CommOpts{
+                //gridSize <= params.GetCoresPerNode() ? true : false //intranode
+                false
+            };
 
-        double totalLocalTime = 0;
+            CommInfo<IT> * info = MakeBcastCommInfo(params.GetGridDim(), params.GetTotalProcs(), msgSize); 
 
+            double singleBcastTime = bcastModel->ComputeTime(info, opts);
+
+            finalTime += singleBcastTime;
+
+            delete info;
+            delete opts;
+        }
+
+
+        /*
         MPI_Comm gridComm = params.GridComm();
         MPI_Comm worldComm = params.WorldComm();
         MPI_Comm reduceComm;
@@ -120,14 +131,11 @@ public:
         MPI_Reduce((void*)(&totalLocalTime), (void*)(&finalTime), 1, MPI_DOUBLE, MPI_MAX, 0, worldComm); 
 
         //double finalTime = singleBcastTime * sqrt(params.GetGridSize());
+        */
 
-        delete info;
-        delete opts;
-        
 #ifdef PROFILE
         auto etime1 = MPI_Wtime();
         auto t1 = (etime1-stime1);
-	    statPtr->Log("Local nnz estimate: " + std::to_string(localNnzApprox));
         statPtr->Log("Bcast calc time " + std::to_string(t1) + "s");
 #endif
 

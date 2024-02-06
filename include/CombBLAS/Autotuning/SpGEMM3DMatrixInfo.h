@@ -93,85 +93,17 @@ public:
             }
         }
 
-        std::vector<int> recvCounts(worldSize);
-        int locRecvCount = static_cast<int>(locTupleSize);
-        MPI_Gather((void*)(&locRecvCount), 1, MPI_INT, 
-                        (void*)recvCounts.data(), 1, MPI_INT, 
-                        0, MPI_COMM_WORLD);
 
-        MPI_Barrier(MPI_COMM_WORLD);
-
-#ifdef DEBUG
-        debugPtr->Log("Recv counts");
-        debugPtr->LogVec(recvCounts); 
-#endif
-
-        // Get displacements
-        // This should be the same as recvcounts, since we want to displace each received array
-        // by its size
-        std::vector<int> displs(worldSize);
-        int sum=0;
-        for (int i=0; i<worldSize; i++) {
-            displs[i] = sum;
-            sum+=recvCounts[i];
-        }
-
-#ifdef DEBUG
-        debugPtr->Log("displs");
-        debugPtr->LogVec(displs);
-#endif
-
-        int globRecvSize = std::accumulate(recvCounts.begin(), recvCounts.end(), 0);
-
-#ifdef DEBUG
-        debugPtr->Log("globRecvSize: " + std::to_string(globRecvSize));
-#endif
-
-        std::tuple<IT,IT,IT> * globTuples = new std::tuple<IT,IT,IT>[globRecvSize];
-
-        MPI_Gatherv((void*)locTuples, locTupleSize, MPI_triple,
-                    (void*)globTuples, recvCounts.data(), displs.data(), MPI_triple,
-                    0, MPI_COMM_WORLD);
-
-
-        END_TIMER("Time for communication: ");
-
-#ifdef DEBUG
-        debugPtr->Log("glob tuples");
-        for (int i=0; i<globRecvSize; i++) {
-            debugPtr->Log(std::to_string(i) + ":" + TupleStr(globTuples[i]));
-        }
-#endif
-
-
-        START_TIMER();
-
-#ifdef DEBUG
-        debugPtr->Log("Making nnz matrix on rank " + std::to_string(rank));
-#endif
-
-        // nnzMatrix[i,j] = nnz on row block i of column j
-        
-        NnzMat * nnzMatrix = nullptr;
-
-        END_TIMER("Time for tuple class constructor: ");
-
-        START_TIMER();
-
-        nnzMatrix = new NnzMat(Mat.getcommgrid()->GetCommGridLayer()->GetGridRows(),
+        NnzMat * nnzMat = new NnzMat(Mat.getcommgrid()->GetCommGridLayer()->GetGridRows(),
                                 Mat.getncol(),
-                                globRecvSize,
-                                globTuples, false);
+                                locTupleSize,
+                                locTuples, true);
 
-#ifdef DEBUG
-        debugPtr->Log("Done with nnz col");
-#endif
-
-        END_TIMER("Time for SpDCCols construction: ");
+        END_TIMER("Time for SpMatCol construction: ");
 
         MPI_Barrier(MPI_COMM_WORLD);
 
-        return nnzMatrix;
+        return nnzMat;
 
     }
 
@@ -209,7 +141,6 @@ public:
     
     /* Given local nnz in initial 2D processor grid, compute nnz per processor in 3D processr grid
      * WITHOUT explicitly forming the 3D processor grid. */
-     //JB: This is impractically slow as it currently stands...
     IT ComputeLocalNnz(const int ppn, const int nodes, const int layers) {
         
         INIT_TIMER();
@@ -246,8 +177,104 @@ public:
 
     }
 
-
     
+    std::vector<IT> ComputeNnzArr(const int ppn, const int nodes, const int layers) {
+        
+        INIT_TIMER();
+
+        START_TIMER();
+
+        std::vector<IT> nnzArr;
+
+        switch(split) {
+
+            case COL_SPLIT:
+            {
+                nnzArr = NnzArrColSplit(ppn,nodes,layers);
+                break;
+            }
+            case ROW_SPLIT:
+            {
+                
+                //locNnz = ComputeLocalNnzRowSplit(ppn,nodes,layers);
+                break;
+            }
+            default:
+            {
+                exit(1);
+            }
+
+        }
+
+        //upcxx::barrier();
+
+        END_TIMER("Compute 3D nnz time: ");
+
+        return nnzArr;
+
+    }
+
+    std::vector<IT> NnzArrColSplit(const int ppn, const int nodes, const int layers) {
+
+        const int totalProcs = ppn*nodes;
+
+        std::vector<IT> nnzArr(totalProcs);
+
+        // Local nnz array
+        for (auto colIter = nnzMatCol->begcol(); colIter!=nnzMatCol->endcol(); colIter++) {
+            int j = colIter.colid();
+            for (auto nzIter = nnzMatCol->begnz(colIter); nzIter!=nnzMatCol->endnz(colIter); nzIter++) {
+                int i = nzIter.rowid();
+                int owner = GetOwner3DColSplit(ppn, nodes, layers, i, j);
+                nnzArr[owner] += nzIter.value();
+            }
+        }
+
+
+        // Allreduce to get complete counts for each process
+
+        MPI_Allreduce(MPI_IN_PLACE, (void*)(nnzArr.data()), totalProcs, MPIType<IT>(), MPI_SUM, MPI_COMM_WORLD);
+
+#ifdef DEBUG
+        debugPtr->Log("nnzArr");
+        debugPtr->LogVec(nnzArr);
+#endif
+
+        return nnzArr;
+
+    }
+        
+
+    int GetOwner3DColSplit(const int ppn, const int nodes, const int layers, const int i, const int j) {
+
+        /* Info about currently, actually formed 2D processor grid */
+        const int totalProcs2D = jobPtr->totalTasks;
+        const int procCols2D = RoundedSqrt<int,int>(totalProcs2D);
+        const int procRows2D = procCols2D;
+
+        /* Info about 3D grid */
+        const int totalProcs = ppn*nodes;
+        const int gridSize = totalProcs / layers;
+        const int gridRows = RoundedSqrt<int,int>(gridSize);
+        const int gridCols = gridRows;
+
+        const IT locNcols3D = locNcols * (procCols2D/gridCols)/layers;
+        const IT locNrows3D = locNrows * (procRows2D/gridRows);
+
+        const int prow = std::min(static_cast<IT>(i / locNrows3D), static_cast<IT>(gridRows));
+        const int pcol = std::min(static_cast<IT>(j / locNcols3D*layers), static_cast<IT>(gridCols));
+        const int player = std::min(static_cast<IT>((j / locNcols3D)%layers), static_cast<IT>(layers));
+
+#ifdef DEBUG
+        debugPtr->Log("locNcols3D: " + std::to_string(locNcols3D));
+        debugPtr->Log("locNrows3D: " + std::to_string(locNrows3D));
+        debugPtr->Log("(i: " + std::to_string(i) + ", j: " + std::to_string(j));
+        debugPtr->Log("(prow: " + std::to_string(prow) + ", pcol: " + std::to_string(pcol) + ", player: " + std::to_string(player) + ")");
+#endif
+
+        return (pcol + prow*gridCols + player*gridSize);
+
+    }
 
 
     IT ComputeLocalNnzColSplit(const int ppn, const int nodes, const int layers) {
