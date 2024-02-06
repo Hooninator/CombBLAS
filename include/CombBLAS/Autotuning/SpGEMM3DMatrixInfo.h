@@ -5,6 +5,8 @@
 #include "common.h"
 
 
+#define NNZ_THRESH 0
+
 namespace combblas {
 namespace autotuning {
 template <typename IT, typename NT, typename DER>
@@ -37,6 +39,10 @@ public:
         
         START_TIMER();
 
+#ifdef DEBUG
+        debugPtr->Log("Starting matcol");
+#endif
+
         nnzMatCol = NnzMatCol(Mat); 
 
 #ifdef DEBUG
@@ -56,9 +62,12 @@ public:
 
 
 
-    /* Create sparse matrix storing nnz for each block row of each column on rank 0  */
+    /* Create sparse matrix storing nnz for each block row of each column and distribute across all ranks  */
     NnzMat * NnzMatCol(SpParMat3D<IT,NT,DER>& Mat) {
 
+        INIT_TIMER();
+
+        START_TIMER();
 
         auto colWorld = Mat.getcommgrid()->GetCommGridLayer()->GetColWorld();
         auto rowWorld = Mat.getcommgrid()->GetCommGridLayer()->GetRowWorld();
@@ -66,33 +75,26 @@ public:
 
         auto colRank = Mat.getcommgrid()->GetCommGridLayer()->GetRankInProcCol();
         auto rowRank = Mat.getcommgrid()->GetCommGridLayer()->GetRankInProcRow();
+
+        MPI_Datatype MPI_triple;
+        MPI_Type_contiguous(sizeof(std::tuple<IT,IT,IT>), MPI_CHAR, &MPI_triple);
+        MPI_Type_commit(&MPI_triple);
+
+        std::tuple<IT,IT,IT> * locTuples = new std::tuple<IT,IT,IT>[locNrowsExact];
+
         
-        std::vector<IT> nnzArrLoc(0);
-        std::vector<IT> colInds(0);
-        std::vector<IT> rowInds(0);
         
         // Init local data
+        int locTupleSize = 0;
         for (auto colIter = Mat.seqptr()->begcol(); colIter!=Mat.seqptr()->endcol(); colIter++) {
-            if (colIter.nnz()>0) {
-                nnzArrLoc.push_back(colIter.nnz());
-                colInds.push_back(colIter.colid() + locNcols*rowRank); // Convert to global column index
-                rowInds.push_back(colRank);
+            if (colIter.nnz()>NNZ_THRESH) {
+                locTuples[locTupleSize] = std::tuple<IT,IT,IT>{colRank,  colIter.colid() + locNcols*rowRank, colIter.nnz()}; 
+                locTupleSize++;
             }
         }
-        
-#ifdef DEBUG
-        debugPtr->Log("sizes: " +std::to_string(nnzArrLoc.size())+","+std::to_string(colInds.size())+","+std::to_string(rowInds.size()));
-        debugPtr->Log("nnzArrLoc");
-        debugPtr->LogVec(nnzArrLoc);
-#endif
 
-        ASSERT((nnzArrLoc.size()==colInds.size()) && (colInds.size()==rowInds.size()), 
-                "Array sizes are not the same on rank " + std::to_string(rank));
-
-
-        // TODO: Replace this (and the others) with MPI_IN_PLACE
         std::vector<int> recvCounts(worldSize);
-        int locRecvCount = static_cast<int>(nnzArrLoc.size());
+        int locRecvCount = static_cast<int>(locTupleSize);
         MPI_Gather((void*)(&locRecvCount), 1, MPI_INT, 
                         (void*)recvCounts.data(), 1, MPI_INT, 
                         0, MPI_COMM_WORLD);
@@ -125,56 +127,47 @@ public:
         debugPtr->Log("globRecvSize: " + std::to_string(globRecvSize));
 #endif
 
-        // Gatherv to bring all arrays to processor 0
-        std::vector<IT> nnzGlob(globRecvSize);
-        std::vector<IT> colsGlob(globRecvSize);
-        std::vector<IT> rowsGlob(globRecvSize);
-        MPI_Gatherv((void*)nnzArrLoc.data(), nnzArrLoc.size(), MPIType<IT>(),
-                    (void*)nnzGlob.data(), recvCounts.data(), displs.data(), MPIType<IT>(),
+        std::tuple<IT,IT,IT> * globTuples = new std::tuple<IT,IT,IT>[globRecvSize];
+
+        MPI_Gatherv((void*)locTuples, locTupleSize, MPI_triple,
+                    (void*)globTuples, recvCounts.data(), displs.data(), MPI_triple,
                     0, MPI_COMM_WORLD);
 
-        MPI_Gatherv((void*)colInds.data(), colInds.size(), MPIType<IT>(),
-                    (void*)colsGlob.data(), recvCounts.data(), displs.data(), MPIType<IT>(),
-                    0, MPI_COMM_WORLD);
 
-        MPI_Gatherv((void*)rowInds.data(), rowInds.size(), MPIType<IT>(),
-                    (void*)rowsGlob.data(), recvCounts.data(), displs.data(), MPIType<IT>(),
-                    0, MPI_COMM_WORLD);
-        
-        std::vector<std::tuple<IT,IT,IT>> * nnzTuples = new std::vector<std::tuple<IT,IT,IT>>(globRecvSize);
+        END_TIMER("Time for communication: ");
 
 #ifdef DEBUG
-        debugPtr->Log("Tuples");
-#endif
-
+        debugPtr->Log("glob tuples");
         for (int i=0; i<globRecvSize; i++) {
-            nnzTuples->at(i) = std::tuple<IT,IT,IT>{rowsGlob[i], colsGlob[i], nnzGlob[i]};
-
-#ifdef DEBUG
-            debugPtr->Log(std::to_string(i) + ":" + TupleStr(nnzTuples->at(i)));
+            debugPtr->Log(std::to_string(i) + ":" + TupleStr(globTuples[i]));
+        }
 #endif
 
-        }
 
+        START_TIMER();
 
 #ifdef DEBUG
         debugPtr->Log("Making nnz matrix on rank " + std::to_string(rank));
-        debugPtr->Print("Making nnz matrix on rank " + std::to_string(rank));
 #endif
 
         // nnzMatrix[i,j] = nnz on row block i of column j
-
-        SpTuples<IT,IT> * nnzSpTuples = new SpTuples<IT,IT>(globRecvSize, Mat.getcommgrid()->GetCommGridLayer()->GetGridRows(),
-                                                            Mat.getncol(),
-                                                            nnzTuples->data());
+        
         NnzMat * nnzMatrix = nullptr;
 
-        nnzMatrix = new NnzMat(*nnzSpTuples, false);
+        END_TIMER("Time for tuple class constructor: ");
+
+        START_TIMER();
+
+        nnzMatrix = new NnzMat(Mat.getcommgrid()->GetCommGridLayer()->GetGridRows(),
+                                Mat.getncol(),
+                                globRecvSize,
+                                globTuples, false);
 
 #ifdef DEBUG
         debugPtr->Log("Done with nnz col");
-        debugPtr->Print("Done with nnz col");
 #endif
+
+        END_TIMER("Time for SpDCCols construction: ");
 
         MPI_Barrier(MPI_COMM_WORLD);
 
@@ -234,7 +227,8 @@ public:
             }
             case ROW_SPLIT:
             {
-                locNnz = ComputeLocalNnzRowSplit(ppn,nodes,layers);
+                
+                //locNnz = ComputeLocalNnzRowSplit(ppn,nodes,layers);
                 break;
             }
             default:
@@ -253,8 +247,12 @@ public:
     }
 
 
-    IT ComputeLocalNnzColSplit(const int ppn, const int nodes, const int layers) {
+    
 
+
+    IT ComputeLocalNnzColSplit(const int ppn, const int nodes, const int layers) {
+        
+        if (rank==0)
         const int totalProcs = ppn*nodes;
 
         if (totalProcs==1) return locNnz;
@@ -287,7 +285,6 @@ public:
         IT locNrows3D = locNrows * (procRows2D/gridRows);
         IT firstRow = gridColRank * locNrows3D; 
         IT lastRow = firstRow + locNrows3D;
-        //if (gridSize==1) lastRow = (nrows / layers) * layers;
 
         /* Row block offset */
         IT rowOffset = locNrows;

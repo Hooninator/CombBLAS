@@ -25,9 +25,16 @@ public:
     
     
     template <typename T>
+    void Print0(T msg) {
+        if (rank==0) std::cout<<msg<<std::endl;
+    }
+
+    
+    template <typename T>
     void Log(T msg) {
         if (rank==0 || _allRanks) ofs<<msg<<std::endl;
     }
+
 
     template <typename T>
     void LogVec(std::vector<T>& v) {
