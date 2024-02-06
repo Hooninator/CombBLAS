@@ -39,6 +39,10 @@ public:
 
         nnzMatCol = NnzMatCol(Mat); 
 
+#ifdef DEBUG
+        debugPtr->Log("Done with matcol");
+#endif
+
         END_TIMER("nnzMatCol Init Time: ");
 
         START_TIMER();
@@ -47,8 +51,6 @@ public:
 
         END_TIMER("nnzMatRow Init Time: ");
 
-        //Synchronize to ensure all processes have activated the  dist_object
-        MPI_Barrier(MPI_COMM_WORLD);
         
     }
 
@@ -139,17 +141,17 @@ public:
                     (void*)rowsGlob.data(), recvCounts.data(), displs.data(), MPIType<IT>(),
                     0, MPI_COMM_WORLD);
         
-        std::vector<std::tuple<IT,IT,IT>> nnzTuples(globRecvSize);
+        std::vector<std::tuple<IT,IT,IT>> * nnzTuples = new std::vector<std::tuple<IT,IT,IT>>(globRecvSize);
 
 #ifdef DEBUG
         debugPtr->Log("Tuples");
 #endif
 
         for (int i=0; i<globRecvSize; i++) {
-            nnzTuples[i] = std::tuple<IT,IT,IT>{rowsGlob[i], colsGlob[i], nnzGlob[i]};
+            nnzTuples->at(i) = std::tuple<IT,IT,IT>{rowsGlob[i], colsGlob[i], nnzGlob[i]};
 
 #ifdef DEBUG
-            debugPtr->Log(std::to_string(i) + ":" + TupleStr(nnzTuples[i]));
+            debugPtr->Log(std::to_string(i) + ":" + TupleStr(nnzTuples->at(i)));
 #endif
 
         }
@@ -162,13 +164,13 @@ public:
 
         // nnzMatrix[i,j] = nnz on row block i of column j
 
-        NnzMat * nnzMatrix;
-        if (rank==0) {
-            SpTuples<IT,IT> nnzSpTuples(globRecvSize, Mat.getcommgrid()->GetCommGridLayer()->GetGridRows(),
-                                            Mat.getncol(),
-                                            nnzTuples.data());
-            NnzMat * nnzMatrix = new NnzMat(nnzSpTuples, false);
-        }
+        SpTuples<IT,IT> * nnzSpTuples = new SpTuples<IT,IT>(globRecvSize, Mat.getcommgrid()->GetCommGridLayer()->GetGridRows(),
+                                                            Mat.getncol(),
+                                                            nnzTuples->data());
+        NnzMat * nnzMatrix = nullptr;
+
+        nnzMatrix = new NnzMat(*nnzSpTuples, false);
+
 #ifdef DEBUG
         debugPtr->Log("Done with nnz col");
         debugPtr->Print("Done with nnz col");
@@ -191,6 +193,8 @@ public:
                 //locNnzVec.push_back += 1;
             }
         }
+
+        return nullptr;
 
     }
 
@@ -382,7 +386,7 @@ public:
         IT innerEnd;
         IT offset;
         IT locDimMod;
-      //  distArr * nnzArr;
+        NnzMatrix * nnzMat;
         
         if (split==ROW_SPLIT) {
             outerStart = firstRow;
@@ -391,7 +395,7 @@ public:
             innerEnd = lastCol;
             offset = this->locNcols;
             locDimMod = this->locNrows;
-        //    nnzArr = this->nnzMatRowDist;
+            nnzMat = this->NnzColMat;
         } else if (split==COL_SPLIT) {
             outerStart = firstCol;
             outerEnd = lastCol;
@@ -399,7 +403,7 @@ public:
             innerEnd = lastRow;
             offset = this->locNrows;
             locDimMod = this->locNcols;
-          //  nnzArr = this->nnzMatColDist;
+            nnzMat = this->NnzRowMat;
         }
 
 
@@ -494,6 +498,7 @@ public:
     inline float GetDensity() const {return density;}
 
     inline SPLIT GetSplit() const {return split;}
+
 
 
 private:
