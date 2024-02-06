@@ -252,7 +252,6 @@ public:
 
     IT ComputeLocalNnzColSplit(const int ppn, const int nodes, const int layers) {
         
-        if (rank==0)
         const int totalProcs = ppn*nodes;
 
         if (totalProcs==1) return locNnz;
