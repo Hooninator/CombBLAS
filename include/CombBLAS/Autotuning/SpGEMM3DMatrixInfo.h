@@ -377,6 +377,7 @@ public:
                         IT firstCol, IT lastCol,
                         int procDim2D)
     {
+
         IT locNnz3D = 0;
         auto addNnz = [&locNnz3D](IT colNnz)mutable{locNnz3D+=colNnz;};
         
@@ -386,7 +387,7 @@ public:
         IT innerEnd;
         IT offset;
         IT locDimMod;
-        NnzMatrix * nnzMat;
+        NnzMat * nnzMat;
         
         if (split==ROW_SPLIT) {
             outerStart = firstRow;
@@ -395,7 +396,7 @@ public:
             innerEnd = lastCol;
             offset = this->locNcols;
             locDimMod = this->locNrows;
-            nnzMat = this->NnzColMat;
+            nnzMat = this->nnzMatRow;
         } else if (split==COL_SPLIT) {
             outerStart = firstCol;
             outerEnd = lastCol;
@@ -403,34 +404,44 @@ public:
             innerEnd = lastRow;
             offset = this->locNrows;
             locDimMod = this->locNcols;
-            nnzMat = this->NnzRowMat;
+            nnzMat = this->nnzMatCol;
         }
 
-
-
-        //TODO: Message aggregation
-        //TODO: Should probably avoid fetching rows with no nonzeros
         
-        for (IT k = outerStart; k<outerEnd; k++) {
-            for (IT l = innerStart; l<innerEnd; l+=offset) {
+        bool edge = false;
+        
+        // Find index of first local column with nonzeros
+        IT locColOffset = 0;
+        for (auto colIter = nnzMat->begcol(); colIter != nnzMat->endcol(); colIter++) {
+            if (colIter.colid()>=outerStart) {
+                break;
+            }
+            locColOffset++;
+        }
+
+        // Find edge case starting point
+        IT edgeColOffset = locColOffset;
+        for (auto colIter = nnzMat->begcol()+locColOffset; colIter != nnzMat->endcol(); colIter++) {
+            if (colIter.colid()>=outerEnd) {
+                edge = true;
+                break;
+            }
+            edgeColOffset++;
+        }
+
+        // Main loop
+        for (auto colIter = nnzMat->begcol() + locColOffset; colIter.colid() < outerEnd; colIter++) {
+            for (auto nzIter = nnzMat->begnz(colIter) + (innerStart / offset); (nzIter.rowid() * offset) < innerEnd; nzIter++) {
+                locNnz3D += nzIter.value();
             }
         }
-        
-        //Handle edge case
-        bool edge;
-        IT edgeEnd;
-        if (split==ROW_SPLIT) {
-            edge = (lastRow==(nrows / procDim2D)*procDim2D);
-            edgeEnd = nrows;
-        } else if (split==COL_SPLIT) {
-            edge = (lastCol==(ncols / procDim2D)*procDim2D);
-            edgeEnd = ncols;
-        }   
 
+
+        // Handle edge case
         if (edge) {
-            for (IT k = outerEnd; k<edgeEnd; k++) {
-                for (IT l = innerStart; l<outerStart; l+=offset) {
-                    int targetRank = TargetRank(k,l, procDim2D, split);
+            for (auto colIter = nnzMat->begcol() + edgeColOffset; colIter != nnzMat->endcol(); colIter++) {
+                for (auto nzIter = nnzMat->begnz(colIter) + (innerStart / offset); nzIter != nnzMat->endnz(colIter); nzIter++) {
+                    locNnz3D += nzIter.value();
                 }
             }
         }
