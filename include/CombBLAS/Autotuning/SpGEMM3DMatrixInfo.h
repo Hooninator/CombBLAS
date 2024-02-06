@@ -16,7 +16,7 @@ public:
     typedef NT nzType;
     typedef DER seqType;
 
-    typedef SpMat<IT,IT,SpDCCols<IT,IT>> NnzMat;
+    typedef SpDCCols<IT,IT> NnzMat;
 
     enum SPLIT {COL_SPLIT, ROW_SPLIT} typedef SPLIT;
 
@@ -55,7 +55,7 @@ public:
 
 
     /* Create sparse matrix storing nnz for each block row of each column on rank 0  */
-    NnzMat NnzMatCol(SpParMat3D<IT,NT,DER>& Mat) {
+    NnzMat * NnzMatCol(SpParMat3D<IT,NT,DER>& Mat) {
 
 
         auto colWorld = Mat.getcommgrid()->GetCommGridLayer()->GetColWorld();
@@ -71,9 +71,11 @@ public:
         
         // Init local data
         for (auto colIter = Mat.seqptr()->begcol(); colIter!=Mat.seqptr()->endcol(); colIter++) {
-            nnzArrLoc.push_back(colIter.nnz());
-            colInds.push_back(colIter.colid());
-            rowInds.push_back(colRank);
+            if (colIter.nnz()>0) {
+                nnzArrLoc.push_back(colIter.nnz());
+                colInds.push_back(colIter.colid() + locNcols*rowRank); // Convert to global column index
+                rowInds.push_back(colRank);
+            }
         }
         
 #ifdef DEBUG
@@ -89,9 +91,6 @@ public:
         // TODO: Replace this (and the others) with MPI_IN_PLACE
         std::vector<int> recvCounts(worldSize);
         int locRecvCount = static_cast<int>(nnzArrLoc.size());
-#ifdef DEBUG
-        debugPtr->Log("locrecvcount: " + std::to_string(locRecvCount));
-#endif
         MPI_Gather((void*)(&locRecvCount), 1, MPI_INT, 
                         (void*)recvCounts.data(), 1, MPI_INT, 
                         0, MPI_COMM_WORLD);
@@ -106,7 +105,18 @@ public:
         // Get displacements
         // This should be the same as recvcounts, since we want to displace each received array
         // by its size
-        std::vector<int> * displs = &recvCounts;
+        std::vector<int> displs(worldSize);
+        int sum=0;
+        for (int i=0; i<worldSize; i++) {
+            displs[i] = sum;
+            sum+=recvCounts[i];
+        }
+
+#ifdef DEBUG
+        debugPtr->Log("displs");
+        debugPtr->LogVec(displs);
+#endif
+
         int globRecvSize = std::accumulate(recvCounts.begin(), recvCounts.end(), 0);
 
 #ifdef DEBUG
@@ -118,45 +128,50 @@ public:
         std::vector<IT> colsGlob(globRecvSize);
         std::vector<IT> rowsGlob(globRecvSize);
         MPI_Gatherv((void*)nnzArrLoc.data(), nnzArrLoc.size(), MPIType<IT>(),
-                    (void*)nnzGlob.data(), recvCounts.data(), displs->data(), MPIType<IT>(),
+                    (void*)nnzGlob.data(), recvCounts.data(), displs.data(), MPIType<IT>(),
                     0, MPI_COMM_WORLD);
 
         MPI_Gatherv((void*)colInds.data(), colInds.size(), MPIType<IT>(),
-                    (void*)colsGlob.data(), recvCounts.data(), displs->data(), MPIType<IT>(),
+                    (void*)colsGlob.data(), recvCounts.data(), displs.data(), MPIType<IT>(),
                     0, MPI_COMM_WORLD);
 
         MPI_Gatherv((void*)rowInds.data(), rowInds.size(), MPIType<IT>(),
-                    (void*)rowsGlob.data(), recvCounts.data(), displs->data(), MPIType<IT>(),
+                    (void*)rowsGlob.data(), recvCounts.data(), displs.data(), MPIType<IT>(),
                     0, MPI_COMM_WORLD);
         
         std::vector<std::tuple<IT,IT,IT>> nnzTuples(globRecvSize);
 
-        for (int i=0; i<globRecvSize; i++) {
-            nnzTuples[i] = std::tuple<IT,IT,IT>{nnzGlob[i], colsGlob[i], rowsGlob[i]};
-        }
-
 #ifdef DEBUG
-        // Make sure we don't mutate the tuples
-        debugPtr->Log("nnzTuples");
-        std::vector<std::string> nnzTuplesDebug(nnzTuples.size());
-        std::transform(nnzTuples.begin(), nnzTuples.begin(), nnzTuplesDebug.begin(),
-                            [](std::tuple<IT,IT,IT>& t){return TupleStr(t);});
-        debugPtr->LogVec(nnzTuplesDebug); 
+        debugPtr->Log("Tuples");
 #endif
 
+        for (int i=0; i<globRecvSize; i++) {
+            nnzTuples[i] = std::tuple<IT,IT,IT>{rowsGlob[i], colsGlob[i], nnzGlob[i]};
+
 #ifdef DEBUG
-        debugPtr->Log("Making nnz matrix on rank 0");
+            debugPtr->Log(std::to_string(i) + ":" + TupleStr(nnzTuples[i]));
+#endif
+
+        }
+
+
+#ifdef DEBUG
+        debugPtr->Log("Making nnz matrix on rank " + std::to_string(rank));
+        debugPtr->Print("Making nnz matrix on rank " + std::to_string(rank));
 #endif
 
         // nnzMatrix[i,j] = nnz on row block i of column j
 
-        SpMat<IT,IT,SpDCCols<IT,IT>> nnzMatrix;
-        nnzMatrix.Create(globRecvSize, Mat.getcommgrid()->GetCommGridLayer()->GetGridRows(),
-                                        Mat.getcommgrid()->GetCommGridLayer()->GetGridRows(),
-                                        nnzTuples.data());
-
+        NnzMat * nnzMatrix;
+        if (rank==0) {
+            SpTuples<IT,IT> nnzSpTuples(globRecvSize, Mat.getcommgrid()->GetCommGridLayer()->GetGridRows(),
+                                            Mat.getncol(),
+                                            nnzTuples.data());
+            NnzMat * nnzMatrix = new NnzMat(nnzSpTuples, false);
+        }
 #ifdef DEBUG
         debugPtr->Log("Done with nnz col");
+        debugPtr->Print("Done with nnz col");
 #endif
 
         MPI_Barrier(MPI_COMM_WORLD);
@@ -167,7 +182,7 @@ public:
 
 
     /* Initialize array containing nnz per row on each processor, then gather on processor 0 */
-    NnzMat NnzMatRow(SpParMat3D<IT,NT,DER>& Mat) {
+    NnzMat * NnzMatRow(SpParMat3D<IT,NT,DER>& Mat) {
     
         std::vector<IT> locNnzVec;
         for (auto colIter = Mat.seqptr()->begcol(); colIter != Mat.seqptr()->endcol(); colIter++) {
@@ -498,8 +513,8 @@ private:
 
     SPLIT split;    
 
-    NnzMat nnzMatCol;
-    NnzMat nnzMatRow;
+    NnzMat * nnzMatCol;
+    NnzMat * nnzMatRow;
 
 };
 
