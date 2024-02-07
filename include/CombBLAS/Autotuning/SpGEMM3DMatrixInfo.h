@@ -215,7 +215,6 @@ public:
 
         }
 
-        //upcxx::barrier();
 
         END_TIMER("Compute 3D nnz time: ");
 
@@ -251,7 +250,6 @@ public:
 
         }
 
-        //upcxx::barrier();
 
         END_TIMER("Compute 3D nnz time: ");
 
@@ -280,8 +278,7 @@ public:
         MPI_Allreduce(MPI_IN_PLACE, (void*)(nnzArr.data()), totalProcs, MPIType<IT>(), MPI_SUM, MPI_COMM_WORLD);
 
 #ifdef DEBUG
-        debugPtr->Log("nnzArr A");
-        debugPtr->LogVec(nnzArr);
+        debugPtr->LogVecSameLine(nnzArr, std::string{"nnzArr A: "});
 #endif
 
         return nnzArr;
@@ -308,8 +305,7 @@ public:
         MPI_Allreduce(MPI_IN_PLACE, (void*)(nnzArr.data()), totalProcs, MPIType<IT>(), MPI_SUM, MPI_COMM_WORLD);
 
 #ifdef DEBUG
-        debugPtr->Log("nnzArr B");
-        debugPtr->LogVec(nnzArr);
+        debugPtr->LogVecSameLine(nnzArr, std::string{"nnzArr B: "});
 #endif
 
         return nnzArr;
