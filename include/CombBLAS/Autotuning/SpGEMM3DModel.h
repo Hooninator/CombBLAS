@@ -87,6 +87,8 @@ public:
 #ifdef PROFILE
         auto stime1 = MPI_Wtime();
 #endif
+
+        if (params.GetGridSize()==1) return 0; //no bcasts in this case
         
         double finalTime = 0;
 
