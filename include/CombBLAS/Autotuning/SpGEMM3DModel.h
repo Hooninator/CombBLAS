@@ -11,7 +11,6 @@
 #include "MergeModel.h"
 #include "SpGEMM3DParams.h"
 #include "PlatformParams.h"
-#include "NnzEstimator.h"
 
 
 namespace combblas {
@@ -92,55 +91,57 @@ public:
 
         if (params.GetGridSize()==1) return 0; //no bcasts in this case
         
-        double finalTime = 0;
-
-        std::vector<IT> localNnzApprox = Minfo.ComputeNnzArr(params.GetPPN(), params.GetNodes(), params.GetLayers());
-        for (auto const& nnz : localNnzApprox) {
-
-            IT msgSize = Minfo.ComputeMsgSize(nnz);
-
-            CommOpts * opts = new CommOpts{
-                //gridSize <= params.GetCoresPerNode() ? true : false //intranode
-                false
-            };
-
-            CommInfo<IT> * info = MakeBcastCommInfo(params.GetGridDim(), params.GetTotalProcs(), msgSize); 
-
-            double singleBcastTime = bcastModel->ComputeTime(info, opts);
-
-            finalTime += singleBcastTime;
-
-            delete info;
-            delete opts;
-        }
-
-
-        /*
-        MPI_Comm gridComm = params.GridComm();
-        MPI_Comm worldComm = params.WorldComm();
-        MPI_Comm reduceComm;
-        if (row) {
-            reduceComm = params.RowComm(gridComm);
-        } else {
-            reduceComm = params.ColComm(gridComm);
-        }
-
-        // Reduce across row/col to get total bcast time
-        for (int i=0; i<params.GetGridDim(); i++) {
-            MPI_Reduce((void*)(&singleBcastTime), (void*)(&totalLocalTime), 1, MPI_DOUBLE, MPI_SUM, i, reduceComm);
-        }
+        // Compute nnz per tile in hypothetical 3D grid
+        std::vector<IT> nnz3D = Minfo.ComputeNnzArr(params.GetPPN(), params.GetNodes(), params.GetLayers());
         
-        // Reduce across all processors in symbolic 3D grid to get max time on rank 0
-        double finalTime = 0;
-        MPI_Reduce((void*)(&totalLocalTime), (void*)(&finalTime), 1, MPI_DOUBLE, MPI_MAX, 0, worldComm); 
+        // Compute local bcast times
+        std::vector<double> locBcastTimes(params.GetTotalProcs());
+        for (int p=0; p<params.GetTotalProcs(); p++) {
+            
+            // Vector containing nnz for each rank participating in broadcasts with rank p
+            std::vector<IT> nnzBcastWorld(params.GetGridDim());
+            if (row) 
+                nnzBcastWorld = Minfo.SliceNnzRow(nnz3D, p, params.GetGridDim());
+            else
+                nnzBcastWorld = Minfo.SliceNnzCol(nnz3D, p, params.GetGridDim());
+            
+            // Compute and sum all times for all bcasts rank p participates in 
+            double locBcastTime = std::reduce(nnzBcastWorld.begin(), nnzBcastWorld.end(), 0, 
+                [&Minfo, &bcastModel, &params](double sum, IT nnz) {
+                    IT msgSize = Minfo.ComputeMsgSize(nnz);
 
-        //double finalTime = singleBcastTime * sqrt(params.GetGridSize());
-        */
+                    CommOpts * opts = new CommOpts{
+                        //gridSize <= params.GetCoresPerNode() ? true : false //intranode
+                        false
+                    };
+
+                    CommInfo<IT> * info = MakeBcastCommInfo(params.GetGridDim(),  msgSize); 
+
+                    double singleBcastTime = bcastModel->ComputeTime(info, opts);
+
+                    delete info;
+                    delete opts;
+
+                    return singleBcastTime + sum;
+                }
+            );
+            
+            locBcastTimes[p] = locBcastTime;
+
+        }
+
+        // Reduce to get max time
+        double finalTime = std::reduce(locBcastTimes.begin(), locBcastTimes.end(), 0,
+            [](double currMax, double currElem) {
+                return std::max(currMax, currElem);
+            }
+        );
 
 #ifdef PROFILE
         auto etime1 = MPI_Wtime();
         auto t1 = (etime1-stime1);
         statPtr->Log("Bcast calc time " + std::to_string(t1) + "s");
+        statPtr->Print("Bcast calc time " + std::to_string(t1) + "s");
 #endif
 
         return finalTime;

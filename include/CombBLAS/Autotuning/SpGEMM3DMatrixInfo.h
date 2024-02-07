@@ -52,14 +52,14 @@ public:
 #ifdef DEBUG
             debugPtr->Log("Done with matcol");
 #endif
-            END_TIMER("nnzMat Init Time: ");
+            END_TIMER("nnzMatCol Init Time: ");
 #else
 #endif
         } else if (split==ROW_SPLIT) {
 #ifdef NNZ_MAT_ROW
             START_TIMER();
             nnzMat = NnzMatRow(Mat);
-            END_TIMER("nnzMat Init Time: ");
+            END_TIMER("nnzMatRow Init Time: ");
 #else
 #endif
         }
@@ -609,14 +609,30 @@ public:
     }
 
 
-
     IT ComputeMsgSize(const int locNnz) {
         return locNnz * GetNzvalSize() +
                 locNnz * GetIndexSize() +
                 (locNnz + 1) * GetIndexSize();
     }
 
-    
+
+    /* Sum nnz in procRank's row of the hypothetical 3D grid */
+    std::vector<IT> SliceNnzRow(std::vector<IT>& nnzArr, int procRank,  int gridDim) {
+        return std::vector<IT>(nnzArr.begin()+procRank, nnzArr.begin()+procRank+gridDim); 
+    }
+
+
+    /* Sum nnz in procRank's column of hypothetical 3D grid */
+    std::vector<IT> SliceNnzCol(std::vector<IT>& nnzArr, int procRank, int gridDim) {
+        //TODO: Can we use C++17 algorithms for this?
+        std::vector<IT> result(gridDim);
+        for (int p=0; p<gridDim; p++) {
+            result[p] = nnzArr[procRank+p*gridDim];
+        }
+        return result;
+    }
+
+
     //NOTE: These compute local sizes for a hypothetical 2D grid
     inline IT LocalNcols(int totalProcs) const {return ncols / static_cast<IT>(sqrt(totalProcs));}
     inline IT LocalNrows(int totalProcs) const {return nrows / static_cast<IT>(sqrt(totalProcs));}
