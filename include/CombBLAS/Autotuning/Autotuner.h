@@ -50,14 +50,24 @@ public:
         std::string matname = ExtractMatName(matpath);
         statPtr = new Logger(rank, "statfile-N"+std::to_string(jobPtr->nodes)+"-"+matname+".out", false);
 #endif
+
+        INIT_TIMER();
+
+        START_TIMER();
         
         SpParMat3D<AIT, ANT, ADER> A3D(A, 1, true, false);
         SpParMat3D<BIT, BNT, BDER> B3D(B, 1, false, false);
     
-        SpGEMM3DMatrixInfo<AIT,ANT,ADER> Ainfo(A3D);
-        SpGEMM3DMatrixInfo<BIT,BNT,BDER> Binfo(B3D);
+        //SpGEMM3DMatrixInfo<AIT,ANT,ADER> Ainfo (A3D);
+        //SpGEMM3DMatrixInfo<BIT,BNT,BDER> Binfo (B3D);
         
-        SpGEMM3DInputs<AIT,ANT,ADER,BIT,BNT,BDER> inputs(Ainfo, Binfo);
+#ifdef DEBUG
+        debugPtr->Print0("Calling inputs constructor");
+#endif
+        SpGEMM3DInputs<AIT,ANT,ADER,BIT,BNT,BDER> inputs(A3D, B3D);
+#ifdef DEBUG
+        debugPtr->Print0("Done with inputs constructor");
+#endif
         
         SpGEMM3DParams resultParams; 
         
@@ -71,7 +81,9 @@ public:
             {
                 break;
             }
-        }        
+        }
+
+        END_TIMER("[TuneSpGEMM3D] ");
 
         return resultParams;
 
@@ -84,7 +96,7 @@ public:
 
     
     template <typename P, typename M, typename I>
-    P SearchBruteForce(I input) {
+    P SearchBruteForce(I& input) {
 
 #ifdef PROFILE
         auto stime1 = MPI_Wtime();

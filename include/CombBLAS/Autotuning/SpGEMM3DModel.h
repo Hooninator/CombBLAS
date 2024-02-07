@@ -23,12 +23,14 @@ class SpGEMM3DInputs {
 
 public:
 
-    SpGEMM3DInputs<AIT,ANT,ADER,BIT,BNT,BDER>(SpGEMM3DMatrixInfo<AIT,ANT,ADER>& Ainfo,
-                                                SpGEMM3DMatrixInfo<BIT,BNT,BDER>& Binfo):
-    Ainfo(Ainfo), Binfo(Binfo) {}
+    SpGEMM3DInputs<AIT,ANT,ADER,BIT,BNT,BDER>(SpParMat3D<AIT,ANT,ADER>& A,
+                                                SpParMat3D<BIT,BNT,BDER>& B):
+        Ainfo(A),Binfo(B)
+    {
+    }
 
-    SpGEMM3DMatrixInfo<AIT,ANT,ADER>& Ainfo;
-    SpGEMM3DMatrixInfo<BIT,BNT,BDER>& Binfo;
+    SpGEMM3DMatrixInfo<AIT,ANT,ADER> Ainfo;
+    SpGEMM3DMatrixInfo<BIT,BNT,BDER> Binfo;
 };
 
 

@@ -6,6 +6,8 @@
 
 
 #define NNZ_THRESH 0
+#define NNZ_MAT_COL
+#define NNZ_MAT_ROW
 
 namespace combblas {
 namespace autotuning {
@@ -29,7 +31,10 @@ public:
         locNcols(Mat.getncol() / RoundedSqrt<IT,IT>(worldSize)), 
         locNrows(Mat.getnrow() / RoundedSqrt<IT,IT>(worldSize)),
         locNcolsExact(Mat.seqptr()->getncol()),
-        locNrowsExact(Mat.seqptr()->getnrow())
+        locNrowsExact(Mat.seqptr()->getnrow()),
+        locMat(Mat.seqptr()),
+        rowRank(Mat.getcommgrid()->GetCommGridLayer()->GetRankInProcRow()),
+        colRank(Mat.getcommgrid()->GetCommGridLayer()->GetRankInProcCol())
      {
         
         INIT_TIMER();
@@ -37,29 +42,31 @@ public:
         density = static_cast<float>(nnz) / static_cast<float>(ncols*nrows);
         split = Mat.isColSplit() ? COL_SPLIT : ROW_SPLIT;
         
-        START_TIMER();
-
+        if (split==COL_SPLIT) {
+#ifdef NNZ_MAT_COL
+            START_TIMER();
 #ifdef DEBUG
-        debugPtr->Log("Starting matcol");
+            debugPtr->Log("Starting matcol");
 #endif
-
-        nnzMatCol = NnzMatCol(Mat); 
-
+            nnzMat = NnzMatCol(Mat); 
 #ifdef DEBUG
-        debugPtr->Log("Done with matcol");
+            debugPtr->Log("Done with matcol");
 #endif
+            END_TIMER("nnzMat Init Time: ");
+#else
+#endif
+        } else if (split==ROW_SPLIT) {
+#ifdef NNZ_MAT_ROW
+            START_TIMER();
+            nnzMat = NnzMatRow(Mat);
+            END_TIMER("nnzMat Init Time: ");
+#else
+#endif
+        }
 
-        END_TIMER("nnzMatCol Init Time: ");
+        MPI_Barrier(MPI_COMM_WORLD);
 
-        START_TIMER();
-
-        nnzMatRow = NnzMatRow(Mat);
-
-        END_TIMER("nnzMatRow Init Time: ");
-
-        
     }
-
 
 
     /* Create sparse matrix storing nnz for each block row of each column and distribute across all ranks  */
@@ -70,9 +77,6 @@ public:
         START_TIMER();
 
         std::tuple<IT,IT,IT> * locTuples = new std::tuple<IT,IT,IT>[locNcolsExact];
-
-        int colRank = Mat.getcommgrid()->GetCommGridLayer()->GetRankInProcCol();
-        int rowRank = Mat.getcommgrid()->GetCommGridLayer()->GetRankInProcRow();
         
         // Init local data
         int locTupleSize = 0;
@@ -113,9 +117,6 @@ public:
 
         START_TIMER();
 
-        int colRank = Mat.getcommgrid()->GetCommGridLayer()->GetRankInProcCol();
-        int rowRank = Mat.getcommgrid()->GetCommGridLayer()->GetRankInProcRow();
-
         // JB: I can't figure out a way to avoid mutating nnz during iteration, so we can't just use std::tuple
         std::map<std::tuple<IT,IT>, IT> nnzMap;
         for (auto colIter = Mat.seqptr()->begcol(); colIter != Mat.seqptr()->endcol(); colIter++) {
@@ -133,12 +134,6 @@ public:
         std::tuple<IT,IT,IT> * locTuples = new std::tuple<IT,IT,IT>[locNrowsExact];
 
         int locTupleSize = 0;
-        /*for (auto const& elem : nnzMap) {
-            std::tuple<IT,IT,IT> t{std::get<0>(elem.first), std::get<1>(elem.first), elem.second};
-            locTuples[locTupleSize] = t;
-            locTupleSize++;
-        }*/
-
         std::for_each(nnzMap.begin(), nnzMap.end(), 
             [&locTuples, &locTupleSize](auto& elem) mutable {
                 std::tuple<IT,IT,IT> t{std::get<0>(elem.first), std::get<1>(elem.first), elem.second};
@@ -263,15 +258,27 @@ public:
 
         std::vector<IT> nnzArr(totalProcs);
 
+#ifdef NNZ_MAT_COL
         // Local nnz array
-        for (auto colIter = nnzMatCol->begcol(); colIter!=nnzMatCol->endcol(); colIter++) {
+        for (auto colIter = nnzMat->begcol(); colIter!=nnzMat->endcol(); colIter++) {
             int j = colIter.colid();
-            for (auto nzIter = nnzMatCol->begnz(colIter); nzIter!=nnzMatCol->endnz(colIter); nzIter++) {
+            for (auto nzIter = nnzMat->begnz(colIter); nzIter!=nnzMat->endnz(colIter); nzIter++) {
                 int i = nzIter.rowid();
                 int owner = GetOwner3D(ppn, nodes, layers, i*locNrows, j, COL_SPLIT);
                 nnzArr[owner] += nzIter.value();
             }
         }
+#else
+        // Just use local matrix
+        for (auto colIter = locMat->begcol(); colIter!=locMat->endcol(); colIter++) {
+            int j = colIter.colid();
+            for (auto nzIter = locMat->begnz(colIter); nzIter!=locMat->endnz(colIter); nzIter++) {
+                int i = nzIter.rowid();
+                int owner = GetOwner3D(ppn, nodes, layers, i+(colRank*locNrows), j+(rowRank*locNcols), COL_SPLIT);
+                nnzArr[owner] += 1;
+            }
+        }
+#endif
 
 
         // Allreduce to get complete counts for each process
@@ -291,15 +298,26 @@ public:
         const int totalProcs = nodes*ppn;
         std::vector<IT> nnzArr(totalProcs);
 
+#ifdef NNZ_MAT_ROW
         // Local data
-        for (auto colIter = nnzMatRow->begcol(); colIter!=nnzMatRow->endcol(); colIter++) {
+        for (auto colIter = nnzMat->begcol(); colIter!=nnzMat->endcol(); colIter++) {
             int j = colIter.colid();
-            for (auto nzIter = nnzMatRow->begnz(colIter); nzIter!=nnzMatRow->endnz(colIter); nzIter++) {
+            for (auto nzIter = nnzMat->begnz(colIter); nzIter!=nnzMat->endnz(colIter); nzIter++) {
                 int i = nzIter.rowid();
                 int owner = GetOwner3D(ppn, nodes, layers, i, j*locNcols, ROW_SPLIT);
                 nnzArr[owner] += nzIter.value();
             }
         }
+#else
+        for (auto colIter = locMat->begcol(); colIter!=locMat->endcol(); colIter++) {
+            int j = colIter.colid();
+            for (auto nzIter = locMat->begnz(colIter); nzIter!=locMat->endnz(colIter); nzIter++) {
+                int i = nzIter.rowid();
+                int owner = GetOwner3D(ppn, nodes, layers, i+(colRank*locNrows), j+(rowRank*locNcols), ROW_SPLIT);
+                nnzArr[owner] += 1; 
+            }
+        }
+#endif
 
         // Allreduce to sum all nnz
         MPI_Allreduce(MPI_IN_PLACE, (void*)(nnzArr.data()), totalProcs, MPIType<IT>(), MPI_SUM, MPI_COMM_WORLD);
@@ -353,10 +371,11 @@ public:
         const int player = std::min(static_cast<IT>((layerIdx / layerDiv)%layers), static_cast<IT>(layers-1));
 
 #ifdef DEBUG
-        debugPtr->Log("locNcols3D: " + std::to_string(locNcols3D));
+/*        debugPtr->Log("locNcols3D: " + std::to_string(locNcols3D));
         debugPtr->Log("locNrows3D: " + std::to_string(locNrows3D));
         debugPtr->Log("(i: " + std::to_string(i) + ", j: " + std::to_string(j) + ")");
         debugPtr->Log("(prow: " + std::to_string(prow) + ", pcol: " + std::to_string(pcol) + ", player: " + std::to_string(player) + ")");
+        */
 #endif
 
         return (pcol + prow*gridCols + player*gridSize);
@@ -497,7 +516,6 @@ public:
         IT innerEnd;
         IT offset;
         IT locDimMod;
-        NnzMat * nnzMat;
         
         if (split==ROW_SPLIT) {
             outerStart = firstRow;
@@ -506,7 +524,6 @@ public:
             innerEnd = lastCol;
             offset = this->locNcols;
             locDimMod = this->locNrows;
-            nnzMat = this->nnzMatRow;
         } else if (split==COL_SPLIT) {
             outerStart = firstCol;
             outerEnd = lastCol;
@@ -514,7 +531,6 @@ public:
             innerEnd = lastRow;
             offset = this->locNrows;
             locDimMod = this->locNcols;
-            nnzMat = this->nnzMatCol;
         }
 
         
@@ -639,8 +655,12 @@ private:
 
     SPLIT split;    
 
-    NnzMat * nnzMatCol;
-    NnzMat * nnzMatRow;
+    NnzMat * nnzMat;
+
+    DER * locMat;
+
+    int rowRank; //rank in actual 2d grid
+    int colRank; //^^
 
 };
 
