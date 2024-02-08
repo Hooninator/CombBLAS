@@ -29,7 +29,7 @@ class LocalSpGEMMModel {
 public:
     LocalSpGEMMModel(){}
     
-    virtual double ComputeTime(LocalSpGEMMInfo<IT> * info) {INVALID_CALL_ERR();}
+    virtual double Time(LocalSpGEMMInfo<IT> * info) {INVALID_CALL_ERR();}
 
 
     /* Approximate local FLOPS using density-based nnz estimation */
@@ -65,15 +65,15 @@ public:
     }
 
 
-    double ComputeTime(LocalSpGEMMInfo<IT> * info) {
+    double Time(LocalSpGEMMInfo<IT> * info) {
 
         IT bytesReadA = info->nnzA*sizeof(NT) + info->nnzA*sizeof(IT) + info->nnzA*sizeof(IT); 
         IT bytesReadB = info->nnzB*sizeof(NT) + info->nnzB*sizeof(IT) + info->nnzB*sizeof(IT); 
 
         IT totalBytes = bytesReadA + bytesReadB;
 
-        double memMovementTime = totalBytes / params.GetMemBW();
-        double computationTime = info->FLOPS / params.GetPeakFLOPS();
+        double memMovementTime = totalBytes / (params.GetMemBW());
+        double computationTime = info->FLOPS / (params.GetPeakFLOPS()/1e6); //convert from FLOPS/s to FLOPS/us
 
         return memMovementTime + computationTime;
 
@@ -99,7 +99,7 @@ public:
         
     }
     
-    double ComputeTime(LocalSpGEMMInfo<IT> * info) {
+    double Time(LocalSpGEMMInfo<IT> * info) {
 
         int i=0;
 

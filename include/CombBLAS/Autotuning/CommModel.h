@@ -32,7 +32,7 @@ class CommModel {
 public:
     CommModel(){}
 
-    virtual double ComputeTime(CommInfo<IT> * info, CommOpts * opts) {INVALID_CALL_ERR();}
+    virtual double Time(CommInfo<IT> * info, CommOpts * opts) {INVALID_CALL_ERR();}
 
     virtual int GetWorld() {INVALID_CALL_ERR();}
 
@@ -51,7 +51,7 @@ public:
 
     }
 
-    double ComputeTime(CommInfo<IT> * info, CommOpts * opts) {
+    double Time(CommInfo<IT> * info, CommOpts * opts) {
         double beta;
         
         if (opts->intranode)

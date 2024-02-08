@@ -70,7 +70,7 @@ public:
         double bcastBTime = BcastTime(bcastModel, Binfo, params, false);
         
         //LOCAL SpGEMM
-        LocalSpGEMMModel<AIT>* localMultModel = new RooflineLocalSpGEMMModel<AIT>(autotuning::perlmutterParams);
+        LocalSpGEMMModel<AIT>* localMultModel = new RooflineLocalSpGEMMModel<AIT, ANT>(autotuning::perlmutterParams);
         double localMultTime = LocalMultTime(localMultModel, Ainfo, Binfo, params);
 
 #ifdef PROFILE
@@ -122,7 +122,7 @@ public:
 
                     CommInfo<IT> * info = MakeBcastCommInfo(params.GetGridDim(),  msgSize); 
 
-                    double singleBcastTime = bcastModel->ComputeTime(info, opts);
+                    double singleBcastTime = bcastModel->Time(info, opts);
 
                     delete info;
                     delete opts;
@@ -175,7 +175,7 @@ public:
                                                         Ainfo.GetNnzArr()->at(rank), 
                                                         Binfo.GetNnzArr()->at(rank)};
 
-        double finalTime = model->ComputeTime(info);
+        double finalTime = model->Time(info);
 
         delete info;
 
