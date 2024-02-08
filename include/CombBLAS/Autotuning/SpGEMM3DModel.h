@@ -58,13 +58,17 @@ public:
         auto Ainfo = inputs.Ainfo;
         auto Binfo = inputs.Binfo;
 
+        // Compute nnz per tile in hypothetical 3D grid
+        Ainfo.SetNnzArr(params.GetPPN(), params.GetNodes(), params.GetLayers());
+        Binfo.SetNnzArr(params.GetPPN(), params.GetNodes(), params.GetLayers());
+
         CommModel<AIT> *bcastModel = new PostCommModel<AIT>(platformParams.GetInternodeAlpha(),
                                                     platformParams.GetInternodeBeta(),
                                                      platformParams.GetIntranodeBeta());
         double bcastATime = BcastTime(bcastModel, Ainfo, params, true);
         double bcastBTime = BcastTime(bcastModel, Binfo, params, false);
         
-        LocalSpGEMMModel * localMultModel = new RegressionLocalSpGEMMModel(autotuning::regSpGEMMPerlmutter);
+        LocalSpGEMMModel<AIT> * localMultModel = new RooflineLocalSpGEMMModel<AIT>(autotuning::regSpGEMMPerlmutter);
         double localMultTime = LocalMultTime(localMultModel, Ainfo, Binfo, params);
 
 #ifdef PROFILE
@@ -91,8 +95,7 @@ public:
 
         if (params.GetGridSize()==1) return 0; //no bcasts in this case
         
-        // Compute nnz per tile in hypothetical 3D grid
-        std::vector<IT> nnz3D = Minfo.ComputeNnzArr(params.GetPPN(), params.GetNodes(), params.GetLayers());
+        std::vector<IT> * nnz3D = Minfo.GetNnzArr();
         
         // Compute local bcast times
         std::vector<double> locBcastTimes(params.GetTotalProcs());
@@ -151,7 +154,7 @@ public:
     /* LOCAL SpGEMM */
     
     template <typename AIT, typename ANT, typename ADER, typename BIT, typename BNT, typename BDER>
-    double LocalMultTime(LocalSpGEMMModel * model, 
+    double LocalMultTime(LocalSpGEMMModel<AIT>* model, 
                             SpGEMM3DMatrixInfo<AIT,ANT,ADER>& Ainfo,
                             SpGEMM3DMatrixInfo<BIT,BNT,BDER>& Binfo,
                             SpGEMM3DParams& params) {
@@ -160,7 +163,15 @@ public:
 #endif
         
         long long localFLOPS = model->ApproxLocalMultFLOPSDensity(Ainfo, Binfo, params.GetTotalProcs(), params.GetGridSize());
-        LocalSpGEMMInfo * info = new LocalSpGEMMInfo { localFLOPS };
+        
+        auto Adims3D = Ainfo.ComputeLocDims3D(params.GetPPN(), params.GetNodes(), params.GetLayers());
+        auto Bdims3D = Binfo.ComputeLocDims3D(params.GetPPN(), params.GetNodes(), params.GetLayers());
+
+        LocalSpGEMMInfo<AIT> * info = new LocalSpGEMMInfo<AIT> { localFLOPS, 
+                                                        std::get<0>(Adims3D), std::get<1>(Adims3D),
+                                                        std::get<0>(Bdims3D), std::get<1>(Bdims3D),
+                                                        Ainfo.GetNnzArr()->at(rank), 
+                                                        Binfo.GetNnzArr()->at(rank)};
 
         double finalTime = model->ComputeTime(info);
 

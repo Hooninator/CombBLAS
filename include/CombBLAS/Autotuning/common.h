@@ -56,6 +56,8 @@
 
 #define INVALID_CALL_ERR() throw std::runtime_error("This method should never be called");
 
+#define UNREACH_ERR() throw std::runtime_error("Never should have come here...");
+
 #ifdef PROFILE
 
 #define INIT_TIMER() auto stime = MPI_Wtime(); auto etime = MPI_Wtime();
@@ -175,6 +177,7 @@ void Init(JobManager jm) {
 
 #ifdef DEBUG
     debugPtr = new Logger(rank,"logfile"+std::to_string(rank)+".out", true);
+    debugPtr->Print0("Debug mode active");
 #endif
 
 

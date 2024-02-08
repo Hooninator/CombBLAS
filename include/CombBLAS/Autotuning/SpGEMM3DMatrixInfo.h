@@ -26,15 +26,23 @@ public:
 
     //NOTE: loc* are values for the actual 2D processor grid
     SpGEMM3DMatrixInfo(SpParMat3D<IT,NT,DER>& Mat):
+        
         nnz(Mat.getnnz()), ncols(Mat.getncol()), nrows(Mat.getnrow()),
+
         locNnz(Mat.seqptr()->getnnz()), 
+
         locNcols(Mat.getncol() / RoundedSqrt<IT,IT>(worldSize)), 
         locNrows(Mat.getnrow() / RoundedSqrt<IT,IT>(worldSize)),
+
         locNcolsExact(Mat.seqptr()->getncol()),
         locNrowsExact(Mat.seqptr()->getnrow()),
+
         locMat(Mat.seqptr()),
+
         rowRank(Mat.getcommgrid()->GetCommGridLayer()->GetRankInProcRow()),
-        colRank(Mat.getcommgrid()->GetCommGridLayer()->GetRankInProcCol())
+        colRank(Mat.getcommgrid()->GetCommGridLayer()->GetRankInProcCol()),
+
+        nnzArr(new std::vector<IT>(0))
      {
         
         INIT_TIMER();
@@ -179,48 +187,35 @@ public:
         return localNnzApprox;
     }
 
-    
-    /* Given local nnz in initial 2D processor grid, compute nnz per processor in 3D processr grid
-     * WITHOUT explicitly forming the 3D processor grid. */
-    std::vector<IT> ComputeNnzArr(const int ppn, const int nodes, const int layers) {
-        
-        INIT_TIMER();
 
-        START_TIMER();
-
-        std::vector<IT> nnzArr;
-
+    void SetNnzArr(const int ppn, const int nodes, const int layers) {
         switch(split) {
-
             case COL_SPLIT:
             {
-                nnzArr = NnzArrColSplit(ppn,nodes,layers);
+                SetNnzArrColSplit(ppn,nodes,layers);
                 break;
             }
             case ROW_SPLIT:
             {
-                nnzArr = NnzArrRowSplit(ppn, nodes, layers);
+                SetNnzArrRowSplit(ppn,nodes,layers);
                 break;
             }
             default:
             {
-                exit(1);
+                UNREACH_ERR();
             }
-
         }
-
-
-        END_TIMER("Compute 3D nnz time: ");
-
-        return nnzArr;
-
     }
 
-    std::vector<IT> NnzArrColSplit(const int ppn, const int nodes, const int layers) {
+    
+    /* Given local nnz in initial 2D processor grid, compute nnz per processor in 3D processr grid
+     * WITHOUT explicitly forming the 3D processor grid. */
+    void SetNnzArrColSplit(const int ppn, const int nodes, const int layers) {
 
         const int totalProcs = ppn*nodes;
 
-        std::vector<IT> nnzArr(totalProcs);
+        nnzArr->clear();
+        nnzArr->resize(totalProcs);
 
 #ifdef NNZ_MAT_COL
         // Local nnz array
@@ -229,7 +224,7 @@ public:
             for (auto nzIter = nnzMat->begnz(colIter); nzIter!=nnzMat->endnz(colIter); nzIter++) {
                 int i = nzIter.rowid();
                 int owner = GetOwner3D(ppn, nodes, layers, i*locNrows, j, COL_SPLIT);
-                nnzArr[owner] += nzIter.value();
+                nnzArr->at(owner) += nzIter.value();
             }
         }
 #else
@@ -239,28 +234,28 @@ public:
             for (auto nzIter = locMat->begnz(colIter); nzIter!=locMat->endnz(colIter); nzIter++) {
                 int i = nzIter.rowid();
                 int owner = GetOwner3D(ppn, nodes, layers, i+(colRank*locNrows), j+(rowRank*locNcols), COL_SPLIT);
-                nnzArr[owner] += 1;
+                nnzArr->at(owner) += 1;
             }
         }
 #endif
 
 
         // Allreduce to get complete counts for each process
-        MPI_Allreduce(MPI_IN_PLACE, (void*)(nnzArr.data()), totalProcs, MPIType<IT>(), MPI_SUM, MPI_COMM_WORLD);
+        MPI_Allreduce(MPI_IN_PLACE, (void*)(nnzArr->data()), totalProcs, MPIType<IT>(), MPI_SUM, MPI_COMM_WORLD);
 
 #ifdef DEBUG
-        debugPtr->LogVecSameLine(nnzArr, std::string{"nnzArr A: "});
+        debugPtr->LogVecSameLine(*nnzArr, std::string{"nnzArr A: "});
 #endif
-
-        return nnzArr;
 
     }
         
 
-    std::vector<IT> NnzArrRowSplit(const int ppn, const int nodes, const int layers) {
+    void SetNnzArrRowSplit(const int ppn, const int nodes, const int layers) {
 
         const int totalProcs = nodes*ppn;
-        std::vector<IT> nnzArr(totalProcs);
+        
+        nnzArr->clear();
+        nnzArr->resize(totalProcs);
 
 #ifdef NNZ_MAT_ROW
         // Local data
@@ -269,7 +264,7 @@ public:
             for (auto nzIter = nnzMat->begnz(colIter); nzIter!=nnzMat->endnz(colIter); nzIter++) {
                 int i = nzIter.rowid();
                 int owner = GetOwner3D(ppn, nodes, layers, i, j*locNcols, ROW_SPLIT);
-                nnzArr[owner] += nzIter.value();
+                nnzArr->at(owner) += nzIter.value();
             }
         }
 #else
@@ -278,24 +273,24 @@ public:
             for (auto nzIter = locMat->begnz(colIter); nzIter!=locMat->endnz(colIter); nzIter++) {
                 int i = nzIter.rowid();
                 int owner = GetOwner3D(ppn, nodes, layers, i+(colRank*locNrows), j+(rowRank*locNcols), ROW_SPLIT);
-                nnzArr[owner] += 1; 
+                nnzArr->at(owner) += 1; 
             }
         }
 #endif
 
         // Allreduce to sum all nnz
-        MPI_Allreduce(MPI_IN_PLACE, (void*)(nnzArr.data()), totalProcs, MPIType<IT>(), MPI_SUM, MPI_COMM_WORLD);
+        MPI_Allreduce(MPI_IN_PLACE, (void*)(nnzArr->data()), totalProcs, MPIType<IT>(), MPI_SUM, MPI_COMM_WORLD);
 
 #ifdef DEBUG
-        debugPtr->LogVecSameLine(nnzArr, std::string{"nnzArr B: "});
+        debugPtr->LogVecSameLine(*nnzArr, std::string{"nnzArr B: "});
 #endif
-
-        return nnzArr;
 
     }
 
-
+    //TODO: Pass SpGEMM3DParams instead of ppn nodes and layers so we don't have to constantly recompute stuff
     int GetOwner3D(const int ppn, const int nodes, const int layers, const int i, const int j, SPLIT split) {
+
+        auto dims3D = ComputeLocDims3D(ppn,nodes,layers);
 
         /* Info about currently, actually formed 2D processor grid */
         const int totalProcs2D = jobPtr->totalTasks;
@@ -308,23 +303,20 @@ public:
         const int gridRows = RoundedSqrt<int,int>(gridSize);
         const int gridCols = gridRows;
 
-        IT locNcols3D;
-        IT locNrows3D;
+        IT locNrows3D = std::get<0>(dims3D);
+        IT locNcols3D = std::get<1>(dims3D);
+
         IT colDiv;
         IT rowDiv;
         IT layerDiv;
         int layerIdx;
         
         if (split==COL_SPLIT) {
-            locNcols3D = locNcols * (procCols2D/gridCols)/layers;
-            locNrows3D = locNrows * (procRows2D/gridRows);
             colDiv = locNcols3D*layers;
             rowDiv = locNrows3D;
             layerDiv = locNcols3D;
             layerIdx = j;
         } else if (split==ROW_SPLIT) {
-            locNcols3D = locNcols * (procCols2D/gridCols);
-            locNrows3D = locNrows * (procRows2D/gridRows)/layers;
             colDiv = locNcols3D;
             rowDiv = locNrows3D*layers;
             layerDiv = locNrows3D;
@@ -346,19 +338,50 @@ public:
                 (locNnz + 1) * GetIndexSize();
     }
 
+    // row, column
+    std::pair<IT,IT> ComputeLocDims3D(const int ppn, const int nodes, const int layers) {
+
+        /* Info about currently, actually formed 2D processor grid */
+        const int totalProcs2D = jobPtr->totalTasks;
+        const int procCols2D = RoundedSqrt<int,int>(totalProcs2D);
+        const int procRows2D = procCols2D;
+
+        /* Info about 3D grid */
+        const int totalProcs = ppn*nodes;
+        const int gridSize = totalProcs / layers;
+        const int gridRows = RoundedSqrt<int,int>(gridSize);
+        const int gridCols = gridRows;
+
+        IT locNcols3D;
+        IT locNrows3D;
+
+        if (split==COL_SPLIT) {
+            locNcols3D = locNcols * (procCols2D/gridCols)/layers;
+            locNrows3D = locNrows * (procRows2D/gridRows);
+        } else if (split==ROW_SPLIT) {
+            locNcols3D = locNcols * (procCols2D/gridCols);
+            locNrows3D = locNrows * (procRows2D/gridRows)/layers;
+        } else {
+            UNREACH_ERR();
+        }
+        
+        return std::make_pair(locNrows3D, locNcols3D);
+
+    }
+
 
     /* Sum nnz in procRank's row of the hypothetical 3D grid */
-    std::vector<IT> SliceNnzRow(std::vector<IT>& nnzArr, int procRank,  int gridDim) {
-        return std::vector<IT>(nnzArr.begin()+procRank, nnzArr.begin()+procRank+gridDim); 
+    std::vector<IT> SliceNnzRow(std::vector<IT> * nnzArr, int procRank,  int gridDim) {
+        return std::vector<IT>(nnzArr->begin()+procRank, nnzArr->begin()+procRank+gridDim); 
     }
 
 
     /* Sum nnz in procRank's column of hypothetical 3D grid */
-    std::vector<IT> SliceNnzCol(std::vector<IT>& nnzArr, int procRank, int gridDim) {
+    std::vector<IT> SliceNnzCol(std::vector<IT> * nnzArr, int procRank, int gridDim) {
         //TODO: Can we use C++17 algorithms for this?
         std::vector<IT> result(gridDim);
         for (int p=0; p<gridDim; p++) {
-            result[p] = nnzArr[procRank+p*gridDim];
+            result[p] = nnzArr->at(procRank+p*gridDim);
         }
         return result;
     }
@@ -383,10 +406,9 @@ public:
 
     inline SPLIT GetSplit() const {return split;}
 
-
+    inline std::vector<IT> * GetNnzArr() {return nnzArr;}
 
 private:
-
 
     IT nnz;
     IT ncols;
@@ -405,6 +427,8 @@ private:
     NnzMat * nnzMat;
 
     DER * locMat;
+
+    std::vector<IT> * nnzArr;
 
     int rowRank; //rank in actual 2d grid
     int colRank; //^^

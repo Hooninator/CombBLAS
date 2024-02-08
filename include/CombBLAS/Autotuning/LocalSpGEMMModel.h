@@ -4,29 +4,37 @@
 
 #include "common.h"
 #include "SpGEMM3DMatrixInfo.h"
+#include "PlatformParams.h"
 
 namespace combblas {
 namespace autotuning {
 
 
+template <typename IT>
 struct LocalSpGEMMInfo {
     
     long long FLOPS;
+    IT Arows;
+    IT Acols;
+    IT Brows;
+    IT Bcols;
+    IT nnzA;
+    IT nnzB;
 
 };
 
+template <typename IT>
 class LocalSpGEMMModel {
 
 public:
     LocalSpGEMMModel(){}
     
-    virtual double ComputeTime(LocalSpGEMMInfo * info) {INVALID_CALL_ERR();}
+    virtual double ComputeTime(LocalSpGEMMInfo<IT> * info) {INVALID_CALL_ERR();}
 
 
     /* Approximate local FLOPS using density-based nnz estimation */
     template <typename AIT, typename ANT, typename ADER, typename BIT, typename BNT, typename BDER>
-    long long ApproxLocalMultFLOPSDensity(SpGEMM3DMatrixInfo<AIT, ANT, ADER>& Ainfo, SpGEMM3DMatrixInfo<BIT, BNT, BDER>& Binfo,
-                                         int totalProcs,  int gridSize){
+    long long ApproxLocalMultFLOPSDensity(SpGEMM3DMatrixInfo<AIT, ANT, ADER>& Ainfo, SpGEMM3DMatrixInfo<BIT, BNT, BDER>& Binfo, int totalProcs,  int gridSize){
 
         const int layers = totalProcs / gridSize;
 
@@ -47,8 +55,33 @@ public:
 };
 
 
+template <typename IT>
+class RooflineLocalSpGEMMModel: public LocalSpGEMMModel<IT> {
+public:
+    RooflineLocalSpGEMMModel(PlatformParams& params):
+        params(params)
+    {
+        
+    }
+
+
+    double ComputeTime(LocalSpGEMMInfo<IT> * info) {
+        
+        return 0;
+
+    }
+
+
+    inline PlatformParams GetParams() {return params;}
+
+private:
+    PlatformParams params;
+};
+
+
 /* T = P(x), P(x) = \sum_{i=0}^d(a*x^i) */
-class RegressionLocalSpGEMMModel : public LocalSpGEMMModel {
+template <typename IT>
+class RegressionLocalSpGEMMModel : public LocalSpGEMMModel<IT> {
     
 public:
 
@@ -58,7 +91,7 @@ public:
         
     }
     
-    double ComputeTime(LocalSpGEMMInfo * info) {
+    double ComputeTime(LocalSpGEMMInfo<IT> * info) {
 
         int i=0;
 
