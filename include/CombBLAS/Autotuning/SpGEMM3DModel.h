@@ -62,13 +62,15 @@ public:
         Ainfo.SetNnzArr(params.GetPPN(), params.GetNodes(), params.GetLayers());
         Binfo.SetNnzArr(params.GetPPN(), params.GetNodes(), params.GetLayers());
 
+        //BROADCAST
         CommModel<AIT> *bcastModel = new PostCommModel<AIT>(platformParams.GetInternodeAlpha(),
                                                     platformParams.GetInternodeBeta(),
                                                      platformParams.GetIntranodeBeta());
         double bcastATime = BcastTime(bcastModel, Ainfo, params, true);
         double bcastBTime = BcastTime(bcastModel, Binfo, params, false);
         
-        LocalSpGEMMModel<AIT> * localMultModel = new RooflineLocalSpGEMMModel<AIT>(autotuning::regSpGEMMPerlmutter);
+        //LOCAL SpGEMM
+        LocalSpGEMMModel<AIT>* localMultModel = new RooflineLocalSpGEMMModel<AIT>(autotuning::perlmutterParams);
         double localMultTime = LocalMultTime(localMultModel, Ainfo, Binfo, params);
 
 #ifdef PROFILE
