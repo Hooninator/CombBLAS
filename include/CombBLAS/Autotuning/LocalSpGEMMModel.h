@@ -55,7 +55,7 @@ public:
 };
 
 
-template <typename IT>
+template <typename IT, typename NT>
 class RooflineLocalSpGEMMModel: public LocalSpGEMMModel<IT> {
 public:
     RooflineLocalSpGEMMModel(PlatformParams& params):
@@ -66,8 +66,16 @@ public:
 
 
     double ComputeTime(LocalSpGEMMInfo<IT> * info) {
-        
-        return 0;
+
+        IT bytesReadA = info->nnzA*sizeof(NT) + info->nnzA*sizeof(IT) + info->nnzA*sizeof(IT); 
+        IT bytesReadB = info->nnzB*sizeof(NT) + info->nnzB*sizeof(IT) + info->nnzB*sizeof(IT); 
+
+        IT totalBytes = bytesReadA + bytesReadB;
+
+        double memMovementTime = totalBytes / params.GetMemBW();
+        double computationTime = info->FLOPS / params.GetPeakFLOPS();
+
+        return memMovementTime + computationTime;
 
     }
 

@@ -338,6 +338,8 @@ public:
                 (locNnz + 1) * GetIndexSize();
     }
 
+
+    //TODO: This really needs to be partitioned better. Logic for "computing stuff given 3d grid" is inconsistent
     // row, column
     std::pair<IT,IT> ComputeLocDims3D(const int ppn, const int nodes, const int layers) {
 
