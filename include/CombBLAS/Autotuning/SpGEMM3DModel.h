@@ -61,6 +61,11 @@ public:
         // Compute nnz per tile in hypothetical 3D grid
         Ainfo.SetNnzArr(params.GetPPN(), params.GetNodes(), params.GetLayers());
         Binfo.SetNnzArr(params.GetPPN(), params.GetNodes(), params.GetLayers());
+#ifdef DEBUG
+        auto debugNnzArr = Ainfo.GetNnzArr();
+        debugPtr->Log("debug nnz arr size: " + std::to_string(debugNnzArr->size()));
+#endif
+
 
         //BROADCAST
         CommModel<AIT> *bcastModel = new PostCommModel<AIT>(platformParams.GetInternodeAlpha(),
@@ -81,6 +86,8 @@ public:
         delete bcastModel;
         delete localMultModel;
 
+        MPI_Barrier(MPI_COMM_WORLD);
+
         return 0;
     }
 
@@ -95,9 +102,14 @@ public:
         auto stime1 = MPI_Wtime();
 #endif
 
+        std::vector<IT> * nnz3D = Minfo.GetNnzArr();
+
+#ifdef DEBUG
+        debugPtr->Log("nnz arr size:" + std::to_string(nnz3D->size()));
+#endif
+
         if (params.GetGridSize()==1) return 0; //no bcasts in this case
         
-        std::vector<IT> * nnz3D = Minfo.GetNnzArr();
         
         // Compute local bcast times
         std::vector<double> locBcastTimes(params.GetTotalProcs());
@@ -169,15 +181,20 @@ public:
         auto Adims3D = Ainfo.ComputeLocDims3D(params.GetPPN(), params.GetNodes(), params.GetLayers());
         auto Bdims3D = Binfo.ComputeLocDims3D(params.GetPPN(), params.GetNodes(), params.GetLayers());
 
-        LocalSpGEMMInfo<AIT> * info = new LocalSpGEMMInfo<AIT> { localFLOPS, 
-                                                        std::get<0>(Adims3D), std::get<1>(Adims3D),
-                                                        std::get<0>(Bdims3D), std::get<1>(Bdims3D),
-                                                        Ainfo.GetNnzArr()->at(rank), 
-                                                        Binfo.GetNnzArr()->at(rank)};
+        const int totalProcs = params.GetTotalProcs();
 
-        double finalTime = model->Time(info);
+        double finalTime = 0;
+        for (int p=0; p<totalProcs; p++) {
+            LocalSpGEMMInfo<AIT> * info = new LocalSpGEMMInfo<AIT> { localFLOPS, 
+                                                            std::get<0>(Adims3D), std::get<1>(Adims3D),
+                                                            std::get<0>(Bdims3D), std::get<1>(Bdims3D),
+                                                            Ainfo.GetNnzArr()->at(p), 
+                                                            Binfo.GetNnzArr()->at(p)};
+            double localTime = model->Time(info);
+            finalTime+=localTime;
 
-        delete info;
+            delete info;
+        }
 
 #ifdef PROFILE
         auto etime1 = MPI_Wtime();

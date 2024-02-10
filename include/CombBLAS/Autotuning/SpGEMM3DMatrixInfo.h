@@ -189,6 +189,10 @@ public:
 
 
     void SetNnzArr(const int ppn, const int nodes, const int layers) {
+        
+        nnzArr->clear();
+        nnzArr->resize(ppn*nodes);
+
         switch(split) {
             case COL_SPLIT:
             {
@@ -207,15 +211,12 @@ public:
         }
     }
 
-    
+
     /* Given local nnz in initial 2D processor grid, compute nnz per processor in 3D processr grid
      * WITHOUT explicitly forming the 3D processor grid. */
     void SetNnzArrColSplit(const int ppn, const int nodes, const int layers) {
 
         const int totalProcs = ppn*nodes;
-
-        nnzArr->clear();
-        nnzArr->resize(totalProcs);
 
 #ifdef NNZ_MAT_COL
         // Local nnz array
@@ -253,9 +254,6 @@ public:
     void SetNnzArrRowSplit(const int ppn, const int nodes, const int layers) {
 
         const int totalProcs = nodes*ppn;
-        
-        nnzArr->clear();
-        nnzArr->resize(totalProcs);
 
 #ifdef NNZ_MAT_ROW
         // Local data
@@ -374,7 +372,7 @@ public:
 
     /* Sum nnz in procRank's row of the hypothetical 3D grid */
     std::vector<IT> SliceNnzRow(std::vector<IT> * nnzArr, int procRank,  int gridDim) {
-        return std::vector<IT>(nnzArr->begin()+procRank, nnzArr->begin()+procRank+gridDim); 
+        return std::vector<IT>(nnzArr->begin()+(procRank/gridDim), nnzArr->begin()+(procRank/gridDim)+gridDim); 
     }
 
 
@@ -383,7 +381,7 @@ public:
         //TODO: Can we use C++17 algorithms for this?
         std::vector<IT> result(gridDim);
         for (int p=0; p<gridDim; p++) {
-            result[p] = nnzArr->at(procRank+p*gridDim);
+            result[p] = nnzArr->at((procRank%gridDim)+p*gridDim);
         }
         return result;
     }

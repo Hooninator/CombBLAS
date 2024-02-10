@@ -205,11 +205,11 @@ CommInfo<IT> * MakeBcastCommInfo(const int bcastWorldSize,  const IT msgSize) {
 
 	}
 
-#ifdef PROFILE
-	statPtr->Log("Bcast algorithm: " + std::to_string(alg));
-	statPtr->Log("Msg size: " + std::to_string(msgSize));
-	statPtr->Log("Send bytes estimate: " + std::to_string(info->numBytes));
-	statPtr->Log("Num msgs estimate: " + std::to_string(info->numMsgs));
+#ifdef DEBUG
+	//debugPtr->Log("Bcast algorithm: " + std::to_string(alg));
+	//debugPtr->Log("Msg size: " + std::to_string(msgSize));
+	//debugPtr->Log("Send bytes estimate: " + std::to_string(info->numBytes));
+	//debugPtr->Log("Num msgs estimate: " + std::to_string(info->numMsgs));
 #endif
 
 	return info;

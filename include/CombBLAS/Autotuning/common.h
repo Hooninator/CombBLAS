@@ -44,7 +44,7 @@
 
 
 #define PROFILE 
-//#define DEBUG
+#define DEBUG
 
 #define ASSERT(condition, message) \
     do { \
