@@ -61,10 +61,6 @@ public:
         // Compute nnz per tile in hypothetical 3D grid
         Ainfo.SetNnzArr(params.GetPPN(), params.GetNodes(), params.GetLayers());
         Binfo.SetNnzArr(params.GetPPN(), params.GetNodes(), params.GetLayers());
-#ifdef DEBUG
-        auto debugNnzArr = Ainfo.GetNnzArr();
-        debugPtr->Log("debug nnz arr size: " + std::to_string(debugNnzArr->size()));
-#endif
 
 
         //BROADCAST

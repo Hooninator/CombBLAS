@@ -7,7 +7,7 @@
 
 #define NNZ_THRESH 0
 #define NNZ_MAT_COL
-#define NNZ_MAT_ROW
+//#define NNZ_MAT_ROW
 
 namespace combblas {
 namespace autotuning {
@@ -20,7 +20,8 @@ public:
     typedef NT nzType;
     typedef DER seqType;
 
-    typedef SpDCCols<IT,IT> NnzMat;
+    /* (row,col,nnz) */  
+    typedef std::vector<std::tuple<IT,IT,IT>> NnzTuples;
 
     enum SPLIT {COL_SPLIT, ROW_SPLIT} typedef SPLIT;
 
@@ -53,22 +54,14 @@ public:
         if (split==COL_SPLIT) {
 #ifdef NNZ_MAT_COL
             START_TIMER();
-#ifdef DEBUG
-            debugPtr->Log("Starting matcol");
-#endif
-            nnzMat = NnzMatCol(Mat); 
-#ifdef DEBUG
-            debugPtr->Log("Done with matcol");
-#endif
-            END_TIMER("nnzMatCol Init Time: ");
-#else
+            nnzTuples = NnzTuplesCol(Mat); 
+            END_TIMER("nnzTuplesCol Init Time: ");
 #endif
         } else if (split==ROW_SPLIT) {
 #ifdef NNZ_MAT_ROW
             START_TIMER();
-            nnzMat = NnzMatRow(Mat);
-            END_TIMER("nnzMatRow Init Time: ");
-#else
+            nnzTuples = NnzTuplesRow(Mat);
+            END_TIMER("nnzTuplesRow Init Time: ");
 #endif
         }
 
@@ -78,20 +71,20 @@ public:
 
 
     /* Create sparse matrix storing nnz for each block row of each column and distribute across all ranks  */
-    NnzMat * NnzMatCol(SpParMat3D<IT,NT,DER>& Mat) {
+    NnzTuples * NnzTuplesCol(SpParMat3D<IT,NT,DER>& Mat) {
 
         INIT_TIMER();
 
         START_TIMER();
 
-        std::tuple<IT,IT,IT> * locTuples = new std::tuple<IT,IT,IT>[locNcolsExact];
+        auto _nnzTuples = new std::vector<std::tuple<IT,IT,IT>>;
+        _nnzTuples->reserve(locNcolsExact);
         
         // Init local data
         int locTupleSize = 0;
         for (auto colIter = Mat.seqptr()->begcol(); colIter!=Mat.seqptr()->endcol(); colIter++) {
             if (colIter.nnz()>NNZ_THRESH) {
-                locTuples[locTupleSize] = std::tuple<IT,IT,IT>{colRank,  colIter.colid() + locNcols*rowRank, colIter.nnz()}; 
-                locTupleSize++;
+                _nnzTuples->push_back( std::tuple<IT,IT,IT>{colRank,  colIter.colid() + locNcols*rowRank, colIter.nnz()} ); 
             }
         }
 
@@ -99,27 +92,18 @@ public:
 
 #ifdef DEBUG
         debugPtr->Log("locNnzTuples col");
-        for (int i=0; i<locTupleSize; i++) {
-            debugPtr->Log(std::to_string(i) + ":" + TupleStr(locTuples[i]));
+        for (int i=0; i<_nnzTuples->size(); i++) {
+            debugPtr->Log(std::to_string(i) + ":" + TupleStr(_nnzTuples->at(i)));
         }
 #endif
 
-        START_TIMER();
-
-        NnzMat * nnzMat = new NnzMat(Mat.getcommgrid()->GetCommGridLayer()->GetGridRows(),
-                                Mat.getncol(),
-                                locTupleSize,
-                                locTuples, false);
-
-        END_TIMER("Time for SpMatCol construction: ");
-
-        return nnzMat;
+        return _nnzTuples;
 
     }
 
 
     /* Initialize array containing nnz per row on each processor, then gather on processor 0 */
-    NnzMat * NnzMatRow(SpParMat3D<IT,NT,DER>& Mat) {
+    NnzTuples * NnzTuplesRow(SpParMat3D<IT,NT,DER>& Mat) {
 
         INIT_TIMER();
 
@@ -139,14 +123,13 @@ public:
 
         START_TIMER();
 
-        std::tuple<IT,IT,IT> * locTuples = new std::tuple<IT,IT,IT>[locNrowsExact];
+        auto  _nnzTuples = new std::vector<std::tuple<IT,IT,IT>>;
+        _nnzTuples->reserve(locNrowsExact);
 
-        int locTupleSize = 0;
         std::for_each(nnzMap.begin(), nnzMap.end(), 
-            [&locTuples, &locTupleSize](auto& elem) mutable {
+            [&_nnzTuples](auto& elem)  {
                 std::tuple<IT,IT,IT> t{std::get<0>(elem.first), std::get<1>(elem.first), elem.second};
-                locTuples[locTupleSize] = t;
-                locTupleSize++;
+                _nnzTuples->push_back( t );
             }
         );
         
@@ -154,21 +137,12 @@ public:
 
 #ifdef DEBUG
         debugPtr->Log("locNnzTuples row");
-        for (int i=0; i<locTupleSize; i++) {
-            debugPtr->Log(std::to_string(i) + ":" + TupleStr(locTuples[i]));
+        for (int i=0; i<_nnzTuples->size(); i++) {
+            debugPtr->Log(std::to_string(i) + ":" + TupleStr(_nnzTuples->at(i)));
         }
 #endif
 
-        START_TIMER();
-
-        NnzMat * nnzMat = new NnzMat(Mat.getnrow(),
-                                    Mat.getcommgrid()->GetCommGridLayer()->GetGridRows(),
-                                    locTupleSize,
-                                    locTuples, false);
-        
-        END_TIMER("Time for SpMatRow Construction: ");
-
-        return nnzMat;
+        return _nnzTuples;
 
     }
 
@@ -220,14 +194,14 @@ public:
 
 #ifdef NNZ_MAT_COL
         // Local nnz array
-        for (auto colIter = nnzMat->begcol(); colIter!=nnzMat->endcol(); colIter++) {
-            int j = colIter.colid();
-            for (auto nzIter = nnzMat->begnz(colIter); nzIter!=nnzMat->endnz(colIter); nzIter++) {
-                int i = nzIter.rowid();
-                int owner = GetOwner3D(ppn, nodes, layers, i*locNrows, j, COL_SPLIT);
-                nnzArr->at(owner) += nzIter.value();
+        std::for_each(nnzTuples->begin(), nnzTuples->end(), 
+            [&ppn,&nodes,&layers,this](auto& t) {
+                int i = std::get<0>(t);
+                int j = std::get<1>(t);
+                int owner = GetOwner3D(ppn, nodes, layers, i*this->locNrows, j, COL_SPLIT);
+                this->nnzArr->at(owner) += std::get<2>(t);
             }
-        }
+        );
 #else
         // Just use local matrix
         for (auto colIter = locMat->begcol(); colIter!=locMat->endcol(); colIter++) {
@@ -257,14 +231,14 @@ public:
 
 #ifdef NNZ_MAT_ROW
         // Local data
-        for (auto colIter = nnzMat->begcol(); colIter!=nnzMat->endcol(); colIter++) {
-            int j = colIter.colid();
-            for (auto nzIter = nnzMat->begnz(colIter); nzIter!=nnzMat->endnz(colIter); nzIter++) {
-                int i = nzIter.rowid();
-                int owner = GetOwner3D(ppn, nodes, layers, i, j*locNcols, ROW_SPLIT);
-                nnzArr->at(owner) += nzIter.value();
+        std::for_each(nnzTuples->begin(), nnzTuples->end(),
+            [&ppn, &nodes, &layers, this](auto& t) {
+                int i = std::get<0>(t);
+                int j = std::get<1>(t);
+                int owner = GetOwner3D(ppn, nodes, layers, i, j*this->locNcols, ROW_SPLIT);
+                this->nnzArr->at(owner) += std::get<2>(t);
             }
-        }
+        );
 #else
         for (auto colIter = locMat->begcol(); colIter!=locMat->endcol(); colIter++) {
             int j = colIter.colid();
@@ -424,7 +398,7 @@ private:
 
     SPLIT split;    
 
-    NnzMat * nnzMat;
+    NnzTuples * nnzTuples;
 
     DER * locMat;
 
