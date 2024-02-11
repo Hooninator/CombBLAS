@@ -76,6 +76,11 @@ public:
 
         END_TIMER("[TuneSpGEMM3D] ");
 
+#ifdef PROFILE
+        statPtr->Log("BEST PARAMS: " + resultParams.OutStr());
+        statPtr->Print("BEST PARAMS: " + resultParams.OutStr());
+#endif
+
         return resultParams;
 
     }
