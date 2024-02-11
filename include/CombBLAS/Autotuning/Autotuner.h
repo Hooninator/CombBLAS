@@ -76,11 +76,6 @@ public:
 
         END_TIMER("[TuneSpGEMM3D] ");
 
-#ifdef PROFILE
-        statPtr->Log("BEST PARAMS: " + resultParams.OutStr());
-        statPtr->Print("BEST PARAMS: " + resultParams.OutStr());
-#endif
-
         return resultParams;
 
     }
@@ -124,7 +119,7 @@ public:
             }
 
 #ifdef PROFILE
-            statPtr->Log("Total runtime " + std::to_string(currTime)+"s");
+            statPtr->Log("Total runtime " + std::to_string(currTime/1e6)+"s");
             statPtr->Log("\n");
 #endif
 

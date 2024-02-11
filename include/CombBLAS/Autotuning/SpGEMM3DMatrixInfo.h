@@ -3,6 +3,7 @@
 #define SPGEMM3DMATRIXINFO_H
 
 #include "common.h"
+#include "SpGEMM3DParams.h"
 
 
 #define NNZ_THRESH 0
@@ -163,6 +164,10 @@ public:
 
 
     void SetNnzArr(const int ppn, const int nodes, const int layers) {
+
+        INIT_TIMER();
+
+        START_TIMER();
         
         nnzArr->clear();
         nnzArr->resize(ppn*nodes);
@@ -183,6 +188,8 @@ public:
                 UNREACH_ERR();
             }
         }
+
+        END_TIMER("Compute 3D nnz time: ");
     }
 
 
@@ -213,7 +220,6 @@ public:
             }
         }
 #endif
-
 
         // Allreduce to get complete counts for each process
         MPI_Allreduce(MPI_IN_PLACE, (void*)(nnzArr->data()), totalProcs, MPIType<IT>(), MPI_SUM, MPI_COMM_WORLD);
@@ -312,6 +318,7 @@ public:
 
 
     //TODO: This really needs to be partitioned better. Logic for "computing stuff given 3d grid" is inconsistent
+    //TODO: All these member functions should accept SpGEMM3DParams instance as argument instead of ppn, nodes, layers..
     // row, column
     std::pair<IT,IT> ComputeLocDims3D(const int ppn, const int nodes, const int layers) {
 
@@ -345,19 +352,51 @@ public:
 
 
     /* Sum nnz in procRank's row of the hypothetical 3D grid */
-    std::vector<IT> SliceNnzRow(std::vector<IT> * nnzArr, int procRank,  int gridDim) {
+    std::vector<IT> SliceNnzRow(const std::vector<IT> * nnzArr, const int procRank, const int gridDim) {
         return std::vector<IT>(nnzArr->begin()+(procRank/gridDim), nnzArr->begin()+(procRank/gridDim)+gridDim); 
     }
 
 
     /* Sum nnz in procRank's column of hypothetical 3D grid */
-    std::vector<IT> SliceNnzCol(std::vector<IT> * nnzArr, int procRank, int gridDim) {
+    std::vector<IT> SliceNnzCol(const std::vector<IT> * nnzArr, const int procRank, const int gridDim) {
         //TODO: Can we use C++17 algorithms for this?
         std::vector<IT> result(gridDim);
         for (int p=0; p<gridDim; p++) {
             result[p] = nnzArr->at((procRank%gridDim)+p*gridDim);
         }
         return result;
+    }
+
+
+    /* Vector of ranks in processor row procRank belongs to, including procRank */
+    std::vector<int> RowRanks(const int procRank, const SpGEMM3DParams& params) {
+
+        std::vector<int> ranks;
+        ranks.reserve(params.GetGridDim()); 
+        
+        for (int p=0; p<params.GetGridDim(); p++) {
+            int currRank = procRank / params.GetGridDim() + p;
+            ranks.push_back(currRank);
+        }
+        
+        return ranks;
+        
+    }
+
+
+    /* Vector of ranks in processor column procRank belongs to, including procRank */
+    std::vector<int> ColRanks(const int procRank, const SpGEMM3DParams& params) {
+
+        std::vector<int> ranks;
+        ranks.reserve(params.GetGridDim()); 
+        
+        for (int p=0; p<params.GetGridDim(); p++) {
+            int currRank = procRank % params.GetGridDim() + (p*params.GetGridDim());
+            ranks.push_back(currRank);
+        }
+        
+        return ranks;
+        
     }
 
 

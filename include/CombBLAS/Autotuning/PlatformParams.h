@@ -67,7 +67,7 @@ private:
 //Values obtained with osu microbenchmarks
 // peak = 3.5Ghz * 2 fmadd * 2 pipelines * 8 flops per vector register
 PlatformParams perlmutterParams(3.9, //alpha 
-                                2406.87, //internode beta
+                                2398.54, //internode beta
                                 4234.33, //intranode beta
                                 128, 4, //cores, gpus
                                 (3.5*1e9)*2*2*8, //peak FLOPS

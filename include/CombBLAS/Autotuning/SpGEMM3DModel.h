@@ -71,7 +71,7 @@ public:
         double bcastBTime = BcastTime(bcastModel, Binfo, params, false);
         
         //LOCAL SpGEMM
-        LocalSpGEMMModel<AIT>* localMultModel = new RooflineLocalSpGEMMModel<AIT, ANT>(autotuning::perlmutterParams);
+        LocalSpGEMMModel<AIT, BIT>* localMultModel = new RooflineLocalSpGEMMModel<AIT, ANT, BIT, BNT>(autotuning::perlmutterParams);
         double localMultTime = LocalMultTime(localMultModel, Ainfo, Binfo, params);
 
 #ifdef PROFILE
@@ -79,12 +79,13 @@ public:
         statPtr->Log("BcastB time " + std::to_string(bcastBTime/1e6) + "s");
         statPtr->Log("LocalMult time " + std::to_string(localMultTime/1e6) + "s");
 #endif
+
         delete bcastModel;
         delete localMultModel;
 
         MPI_Barrier(MPI_COMM_WORLD);
 
-        return 0;
+        return bcastATime + bcastBTime + localMultTime;
     }
 
 
@@ -100,10 +101,6 @@ public:
 
         std::vector<IT> * nnz3D = Minfo.GetNnzArr();
 
-#ifdef DEBUG
-        debugPtr->Log("nnz arr size:" + std::to_string(nnz3D->size()));
-#endif
-
         if (params.GetGridSize()==1) return 0; //no bcasts in this case
         
         
@@ -113,6 +110,7 @@ public:
             
             // Vector containing nnz for each rank participating in broadcasts with rank p
             std::vector<IT> nnzBcastWorld(params.GetGridDim());
+            //TODO: Params class should have methods that return ranks in row/col, then just use std::transform to create bcast world
             if (row) 
                 nnzBcastWorld = Minfo.SliceNnzRow(nnz3D, p, params.GetGridDim());
             else
@@ -164,7 +162,7 @@ public:
     /* LOCAL SpGEMM */
     
     template <typename AIT, typename ANT, typename ADER, typename BIT, typename BNT, typename BDER>
-    double LocalMultTime(LocalSpGEMMModel<AIT>* model, 
+    double LocalMultTime(LocalSpGEMMModel<AIT, BIT>* model, 
                             SpGEMM3DMatrixInfo<AIT,ANT,ADER>& Ainfo,
                             SpGEMM3DMatrixInfo<BIT,BNT,BDER>& Binfo,
                             SpGEMM3DParams& params) {
@@ -172,30 +170,58 @@ public:
         auto stime1 = MPI_Wtime();
 #endif
         
-        long long localFLOPS = model->ApproxLocalMultFLOPSDensity(Ainfo, Binfo, params.GetTotalProcs(), params.GetGridSize());
-        
         auto Adims3D = Ainfo.ComputeLocDims3D(params.GetPPN(), params.GetNodes(), params.GetLayers());
         auto Bdims3D = Binfo.ComputeLocDims3D(params.GetPPN(), params.GetNodes(), params.GetLayers());
 
         const int totalProcs = params.GetTotalProcs();
 
-        double finalTime = 0;
+        std::vector<double> * localSpGEMMTimes = new std::vector<double>;
+        localSpGEMMTimes->reserve(totalProcs);
         for (int p=0; p<totalProcs; p++) {
-            LocalSpGEMMInfo<AIT> * info = new LocalSpGEMMInfo<AIT> { localFLOPS, 
-                                                            std::get<0>(Adims3D), std::get<1>(Adims3D),
-                                                            std::get<0>(Bdims3D), std::get<1>(Bdims3D),
-                                                            Ainfo.GetNnzArr()->at(p), 
-                                                            Binfo.GetNnzArr()->at(p)};
-            double localTime = model->Time(info);
-            finalTime+=localTime;
 
-            delete info;
+            auto ranksA = Ainfo.RowRanks(p, params);
+            auto ranksB = Binfo.ColRanks(p, params);
+
+            ASSERT(ranksA.size()==ranksB.size(), "ranksA and ranksB should be the same size, instead got " +
+                                                    std::to_string(ranksA.size()) +  "," + std::to_string(ranksB.size()));
+
+            for (int i=0; i<ranksA.size(); i++) {
+                int rankA = ranksA[i];
+                int rankB = ranksB[i];
+                //TODO: Replace this with a proper constructor
+                LocalSpGEMMInfo<AIT, BIT> * info = new LocalSpGEMMInfo<AIT, BIT> 
+                                                    { 0, //placeholder 
+                                                    std::get<0>(Adims3D), std::get<1>(Adims3D),
+                                                    std::get<0>(Bdims3D), std::get<1>(Bdims3D),
+                                                    Ainfo.GetNnzArr()->at(p), 
+                                                    Binfo.GetNnzArr()->at(p),
+                                                    static_cast<float>(Ainfo.GetNnz())/
+                                                        static_cast<float>(Ainfo.GetNcols()*Ainfo.GetNrows()),
+                                                    static_cast<float>(Ainfo.GetNnzArr()->at(p))/
+                                                        static_cast<float>(std::get<0>(Adims3D)*std::get<1>(Adims3D)),
+                                                    static_cast<float>(Binfo.GetNnz())/
+                                                        static_cast<float>(Binfo.GetNcols()*Binfo.GetNrows()),
+                                                    static_cast<float>(Binfo.GetNnzArr()->at(p))/
+                                                    static_cast<float>(std::get<0>(Bdims3D)*std::get<1>(Bdims3D))};
+                info->SetFLOPSGlobalDensity(params);
+                localSpGEMMTimes->push_back(model->Time(info));
+            }
+
         }
+
+
+        // Reduce to get max time
+        double finalTime = std::reduce(localSpGEMMTimes->begin(),localSpGEMMTimes->end(), 0,
+            [](double currMax, double currElem) {
+                return std::max(currMax, currElem);
+            }
+        );
 
 #ifdef PROFILE
         auto etime1 = MPI_Wtime();
         auto t1 = (etime1-stime1);
         statPtr->Log("LocalMult calc time " + std::to_string(t1) + "s");
+        statPtr->Print("LocalMult calc time " + std::to_string(t1) + "s");
 #endif
 
         return finalTime;
@@ -205,7 +231,7 @@ public:
         return 0;
     }
  
-    double AlltoAllTime(){return 0;}
+    double AllToAllTime(){return 0;}
     double MergeFiberTime(){return 0;}
     
 

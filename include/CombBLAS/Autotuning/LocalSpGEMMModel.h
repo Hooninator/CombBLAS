@@ -10,53 +10,73 @@ namespace combblas {
 namespace autotuning {
 
 
-template <typename IT>
+template <typename AIT, typename BIT>
 struct LocalSpGEMMInfo {
     
     long long FLOPS;
-    IT Arows;
-    IT Acols;
-    IT Brows;
-    IT Bcols;
-    IT nnzA;
-    IT nnzB;
+
+    AIT rowsA;
+    AIT colsA;
+    BIT rowsB;
+    BIT colsB;
+    AIT nnzA;
+    BIT nnzB;
+
+    float globDensityA;
+    float locDensityA;
+    float globDensityB;
+    float locDensityB;
+
+    /* Approximate local FLOPS using global density-based nnz estimation */
+    void SetFLOPSGlobalDensity(SpGEMM3DParams& params) {
+
+        const int layers = params.GetLayers();
+
+        long long tileFLOPS = globDensityA * (rowsA / params.GetGridDim()) * // estimate nnz per col of A
+                        globDensityA * (rowsB / (params.GetLayers() * params.GetGridDim())) * // estimate nnz per col of B
+                        (colsB / params.GetGridDim()); // once per col of B
+
+#ifdef PROFILE
+        statPtr->Log("Tile FLOPS-Global Density: " + std::to_string(tileFLOPS));
+#endif
+
+        FLOPS = tileFLOPS;
+
+    }
+
+    /* Approximate local FLOPS using global density-based nnz estimation */
+    void SetFLOPSLocalDensity(SpGEMM3DParams& params) {
+
+        const int layers = params.GetLayers();
+
+        long long tileFLOPS = locDensityA * (rowsA / params.GetGridDim()) * // estimate nnz per col of A
+                        locDensityA * (rowsB / (params.GetLayers() * params.GetGridDim())) * // estimate nnz per col of B
+                        (colsB / params.GetGridDim()); // once per col of B
+
+#ifdef PROFILE
+        statPtr->Log("Tile FLOPS-Local Density: " + std::to_string(tileFLOPS));
+#endif
+
+        FLOPS =tileFLOPS;
+
+    }
 
 };
 
-template <typename IT>
+
+template <typename AIT, typename BIT>
 class LocalSpGEMMModel {
 
 public:
     LocalSpGEMMModel(){}
     
-    virtual double Time(LocalSpGEMMInfo<IT> * info) {INVALID_CALL_ERR();}
-
-
-    /* Approximate local FLOPS using density-based nnz estimation */
-    template <typename AIT, typename ANT, typename ADER, typename BIT, typename BNT, typename BDER>
-    long long ApproxLocalMultFLOPSDensity(SpGEMM3DMatrixInfo<AIT, ANT, ADER>& Ainfo, SpGEMM3DMatrixInfo<BIT, BNT, BDER>& Binfo, int totalProcs,  int gridSize){
-
-        const int layers = totalProcs / gridSize;
-
-        long long tileFLOPS = Ainfo.GetDensity() * (Ainfo.GetNrows() / RoundedSqrt<int,int>(gridSize)) * // estimate nnz per col of A
-                        Binfo.GetDensity() * (Binfo.GetNrows() / (layers * RoundedSqrt<int,int>(gridSize))) * // estimate nnz per col of B
-                        (Binfo.GetNcols() / RoundedSqrt<int,int>(gridSize)); // once per col of B
-        long long localFLOPS = tileFLOPS * RoundedSqrt<int,int>(gridSize); //we do sqrt(gridSize) local multiplies
-
-#ifdef PROFILE
-        statPtr->Log("Local FLOPS " + std::to_string(localFLOPS));
-#endif
-
-        return localFLOPS;
-
-    }
-
+    virtual double Time(LocalSpGEMMInfo<AIT, BIT> * info) {INVALID_CALL_ERR();}
 
 };
 
 
-template <typename IT, typename NT>
-class RooflineLocalSpGEMMModel: public LocalSpGEMMModel<IT> {
+template <typename AIT, typename ANT, typename BIT, typename BNT>
+class RooflineLocalSpGEMMModel: public LocalSpGEMMModel<AIT, BIT> {
 public:
     RooflineLocalSpGEMMModel(PlatformParams& params):
         params(params)
@@ -65,15 +85,20 @@ public:
     }
 
 
-    double Time(LocalSpGEMMInfo<IT> * info) {
+    double Time(LocalSpGEMMInfo<AIT, BIT> * info) {
 
-        IT bytesReadA = info->nnzA*sizeof(NT) + info->nnzA*sizeof(IT) + info->nnzA*sizeof(IT); 
-        IT bytesReadB = info->nnzB*sizeof(NT) + info->nnzB*sizeof(IT) + info->nnzB*sizeof(IT); 
+        AIT bytesReadA = info->nnzA*sizeof(ANT) + info->nnzA*sizeof(AIT) + info->nnzA*sizeof(AIT); 
+        BIT bytesReadB = info->nnzB*sizeof(BNT) + info->nnzB*sizeof(BIT) + info->nnzB*sizeof(BIT); 
 
-        IT totalBytes = bytesReadA + bytesReadB;
+        AIT totalBytes = bytesReadA + bytesReadB; //TODO: cast as whichever type is larger
 
         double memMovementTime = totalBytes / (params.GetMemBW());
         double computationTime = info->FLOPS / (params.GetPeakFLOPS()/1e6); //convert from FLOPS/s to FLOPS/us
+                                                                            //
+#ifdef DEBUG
+        debugPtr->Log("mem movement time: " + std::to_string(memMovementTime));
+        debugPtr->Log("computation time: " + std::to_string(computationTime));
+#endif
 
         return memMovementTime + computationTime;
 
@@ -87,7 +112,7 @@ private:
 };
 
 
-/* T = P(x), P(x) = \sum_{i=0}^d(a*x^i) */
+/* T = P(x), P(x) = \sum_{i=0}^d(a*x^i) 
 template <typename IT>
 class RegressionLocalSpGEMMModel : public LocalSpGEMMModel<IT> {
     
@@ -125,7 +150,7 @@ private:
 //TODO: C++ program to do this
 //This is going to make things complicated...
 std::vector<double> regSpGEMMPerlmutter {1.37959216, 3.96351051e-07};
-
+*/
 
 }//autotuning
 }//combblas
