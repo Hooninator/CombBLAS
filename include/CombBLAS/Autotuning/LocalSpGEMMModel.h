@@ -32,9 +32,9 @@ struct LocalSpGEMMInfo {
 
         const int layers = params.GetLayers();
 
-        long long tileFLOPS = globDensityA * (rowsA / params.GetGridDim()) * // estimate nnz per col of A
-                        globDensityA * (rowsB / (params.GetLayers() * params.GetGridDim())) * // estimate nnz per col of B
-                        (colsB / params.GetGridDim()); // once per col of B
+        long long tileFLOPS = globDensityA * (rowsA) * // estimate nnz per col of A
+                        globDensityB * rowsB * // estimate nnz per col of B
+                        colsB ; // once per col of B
 
 #ifdef PROFILE
         statPtr->Log("Tile FLOPS-Global Density: " + std::to_string(tileFLOPS));
@@ -49,16 +49,31 @@ struct LocalSpGEMMInfo {
 
         const int layers = params.GetLayers();
 
-        long long tileFLOPS = locDensityA * (rowsA / params.GetGridDim()) * // estimate nnz per col of A
-                        locDensityA * (rowsB / (params.GetLayers() * params.GetGridDim())) * // estimate nnz per col of B
-                        (colsB / params.GetGridDim()); // once per col of B
+        long long tileFLOPS = locDensityA * (rowsA) * // estimate nnz per col of A
+                        locDensityB * rowsB * // estimate nnz per col of B
+                        colsB ; // once per col of B
 
 #ifdef PROFILE
         statPtr->Log("Tile FLOPS-Local Density: " + std::to_string(tileFLOPS));
 #endif
 
-        FLOPS =tileFLOPS;
+        FLOPS = tileFLOPS;
 
+    }
+
+
+    /* Approximate local FLOPS using actual nnzA and nnzB */
+    void SetFLOPSPreciseNnz(SpGEMM3DParams& params) {
+        const int layers = params.GetLayers();
+
+        long long tileFLOPS = (nnzA/colsA) * // estimate nnz per col of A
+                        (nnzB/colsB)  * // estimate nnz per col of B
+                        colsB ; // once per col of B
+#ifdef PROFILE
+        statPtr->Log("Tile FLOPS-Precise Nnz: " + std::to_string(tileFLOPS));
+#endif
+
+        FLOPS = tileFLOPS;
     }
 
 };
@@ -94,10 +109,10 @@ public:
 
         double memMovementTime = totalBytes / (params.GetMemBW());
         double computationTime = info->FLOPS / (params.GetPeakFLOPS()/1e6); //convert from FLOPS/s to FLOPS/us
-                                                                            //
-#ifdef DEBUG
-        debugPtr->Log("mem movement time: " + std::to_string(memMovementTime));
-        debugPtr->Log("computation time: " + std::to_string(computationTime));
+                                                                            
+#ifdef PROFILE
+        statPtr->Log("Mem movement time: " + std::to_string(memMovementTime));
+        statPtr->Log("Computation time: " + std::to_string(computationTime));
 #endif
 
         return memMovementTime + computationTime;
