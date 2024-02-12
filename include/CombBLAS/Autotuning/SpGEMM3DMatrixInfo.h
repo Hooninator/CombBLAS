@@ -49,7 +49,8 @@ public:
         
         INIT_TIMER();
 
-        density = static_cast<float>(nnz) / static_cast<float>(ncols*nrows);
+        globDensity = static_cast<float>(nnz) / static_cast<float>(ncols*nrows);
+        locDensity = static_cast<float>(locNnz) / static_cast<float>(locNcolsExact*locNrowsExact);
         split = Mat.isColSplit() ? COL_SPLIT : ROW_SPLIT;
         
         if (split==COL_SPLIT) {
@@ -148,17 +149,34 @@ public:
     }
 
 
-
-    /* Approximate local nnz using matrix density
+    /* Approximate local nnz using matrix globDensity
      * This actually just computes the avg nnz per processor
      */
-    IT ApproxLocalNnzDensity(const int totalProcs) {
+    IT ApproxLocNnzGlobDensity(SpGEMM3DParams& params) {
 
-        IT localNcols = LocalNcols(totalProcs); //TODO: These should not be member functions, just members
-        IT localNrows = LocalNrows(totalProcs);
+        auto dims3D = ComputeLocDims3D(params.GetPPN(), params.GetNodes(), params.GetLayers());
+
+        IT localNcols = std::get<1>(dims3D);
+        IT localNrows = std::get<0>(dims3D);
         IT localMatSize = localNcols * localNrows;
 
-        IT localNnzApprox = static_cast<IT>(density * localMatSize);
+        IT localNnzApprox = static_cast<IT>(globDensity * localMatSize);
+        return localNnzApprox;
+    }
+
+
+    /* Approximate local nnz using matrix globDensity
+     * This actually just computes the avg nnz per processor
+     */
+    IT ApproxLocNnzLocDensity(SpGEMM3DParams& params) {
+
+        auto dims3D = ComputeLocDims3D(params.GetPPN(), params.GetNodes(), params.GetLayers());
+
+        IT localNcols = std::get<1>(dims3D);
+        IT localNrows = std::get<0>(dims3D);
+        IT localMatSize = localNcols * localNrows;
+
+        IT localNnzApprox = static_cast<IT>(locDensity * localMatSize);
         return localNnzApprox;
     }
 
@@ -400,10 +418,6 @@ public:
     }
 
 
-    //NOTE: These compute local sizes for a hypothetical 2D grid
-    inline IT LocalNcols(int totalProcs) const {return ncols / static_cast<IT>(sqrt(totalProcs));}
-    inline IT LocalNrows(int totalProcs) const {return nrows / static_cast<IT>(sqrt(totalProcs));}
-
     inline int GetIndexSize() const {return sizeof(IT);}
     inline int GetNzvalSize() const {return sizeof(NT);}
 
@@ -415,7 +429,8 @@ public:
     inline IT GetLocNcols() const {return locNcols;}
     inline IT GetLocNrows() const {return locNrows;}
 
-    inline float GetDensity() const {return density;}
+    inline float GetGlobDensity() const {return globDensity;}
+    inline float GetLocDensity() const {return locDensity;}
 
     inline SPLIT GetSplit() const {return split;}
 
@@ -433,7 +448,8 @@ private:
     IT locNcolsExact;
     IT locNrowsExact;
 
-    float density;
+    float globDensity;
+    float locDensity;
 
     SPLIT split;    
 
