@@ -58,10 +58,13 @@ public:
         auto Ainfo = inputs.Ainfo;
         auto Binfo = inputs.Binfo;
 
-        // Compute nnz per tile in hypothetical 3D grid
-        Ainfo.SetNnzArr(params.GetPPN(), params.GetNodes(), params.GetLayers());
-        Binfo.SetNnzArr(params.GetPPN(), params.GetNodes(), params.GetLayers());
+        // Set dimensions of 3D processor grid
+        Ainfo.SetDims3D(params);
+        Binfo.SetDims3D(params);
 
+        // Compute nnz per tile in hypothetical 3D grid
+        Ainfo.SetNnzArr(params);
+        Binfo.SetNnzArr(params);
 
         //BROADCAST
         CommModel<AIT> *bcastModel = new PostCommModel<AIT>(platformParams.GetInternodeAlpha(),
@@ -170,8 +173,8 @@ public:
         auto stime1 = MPI_Wtime();
 #endif
         
-        auto Adims3D = Ainfo.ComputeLocDims3D(params.GetPPN(), params.GetNodes(), params.GetLayers());
-        auto Bdims3D = Binfo.ComputeLocDims3D(params.GetPPN(), params.GetNodes(), params.GetLayers());
+        auto Adims3D = Ainfo.GetDims3D(); 
+        auto Bdims3D = Binfo.GetDims3D();
 
         const int totalProcs = params.GetTotalProcs();
 
@@ -192,14 +195,13 @@ public:
                                                     { -1, //placeholder 
                                                     std::get<0>(Adims3D), std::get<1>(Adims3D),
                                                     std::get<0>(Bdims3D), std::get<1>(Bdims3D),
-                                                    Ainfo.GetNnzArr()->at(rankA), 
-                                                    Binfo.GetNnzArr()->at(rankB),
+                                                    Ainfo.GetLocNnz3D(NNZ_ARR,rankA), 
+                                                    Binfo.GetLocNnz3D(NNZ_ARR,rankB),
                                                     Ainfo.GetGlobDensity(),
                                                     Ainfo.GetLocDensity(),
                                                     Binfo.GetGlobDensity(),
                                                     Binfo.GetLocDensity()};
-                //info->SetFLOPSGlobalDensity(params);
-                info->SetFLOPSPreciseNnz(params);
+                info->SetFLOPS(params, FLOPS_NNZ);
                 localSpGEMMTimes->push_back(model->Time(info));
             }
 

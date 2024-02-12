@@ -9,9 +9,15 @@
 namespace combblas {
 namespace autotuning {
 
+enum FLOPS_STRAT {
+    FLOPS_GLOB_DENSITY,
+    FLOPS_LOC_DENSITY,
+    FLOPS_NNZ
+};
 
 template <typename AIT, typename BIT>
 struct LocalSpGEMMInfo {
+
     
     long long FLOPS;
 
@@ -27,10 +33,24 @@ struct LocalSpGEMMInfo {
     float globDensityB;
     float locDensityB;
 
+    void SetFLOPS(SpGEMM3DParams& params, FLOPS_STRAT strat) {
+        switch(strat) {
+            case FLOPS_GLOB_DENSITY:
+                SetFLOPSGlobalDensity(params);
+                break;
+            case FLOPS_LOC_DENSITY:
+                SetFLOPSLocalDensity(params);
+                break;
+            case FLOPS_NNZ:
+                SetFLOPSNnzArr(params);
+                break;
+            default:
+                UNREACH_ERR();
+        }
+    }
+
     /* Approximate local FLOPS using global density-based nnz estimation */
     void SetFLOPSGlobalDensity(SpGEMM3DParams& params) {
-
-        const int layers = params.GetLayers();
 
         long long tileFLOPS = globDensityA * (rowsA) * // estimate nnz per col of A
                         globDensityB * rowsB * // estimate nnz per col of B
@@ -47,8 +67,6 @@ struct LocalSpGEMMInfo {
     /* Approximate local FLOPS using global density-based nnz estimation */
     void SetFLOPSLocalDensity(SpGEMM3DParams& params) {
 
-        const int layers = params.GetLayers();
-
         long long tileFLOPS = locDensityA * (rowsA) * // estimate nnz per col of A
                         locDensityB * rowsB * // estimate nnz per col of B
                         colsB ; // once per col of B
@@ -63,17 +81,18 @@ struct LocalSpGEMMInfo {
 
 
     /* Approximate local FLOPS using actual nnzA and nnzB */
-    void SetFLOPSPreciseNnz(SpGEMM3DParams& params) {
-        const int layers = params.GetLayers();
+    void SetFLOPSNnzArr(SpGEMM3DParams& params) {
 
         long long tileFLOPS = (nnzA/colsA) * // estimate nnz per col of A
                         (nnzB/colsB)  * // estimate nnz per col of B
                         colsB ; // once per col of B
+                            
 #ifdef PROFILE
         statPtr->Log("Tile FLOPS-Precise Nnz: " + std::to_string(tileFLOPS));
 #endif
 
         FLOPS = tileFLOPS;
+
     }
 
 };
@@ -102,20 +121,27 @@ public:
 
     double Time(LocalSpGEMMInfo<AIT, BIT> * info) {
 
+        ASSERT(info->FLOPS>-1, "FLOPS for localSpGEMM should not be -1");
+
         AIT bytesReadA = info->nnzA*sizeof(ANT) + info->nnzA*sizeof(AIT) + info->nnzA*sizeof(AIT); 
         BIT bytesReadB = info->nnzB*sizeof(BNT) + info->nnzB*sizeof(BIT) + info->nnzB*sizeof(BIT); 
 
         AIT totalBytes = bytesReadA + bytesReadB; //TODO: cast as whichever type is larger
 
-        double memMovementTime = totalBytes / (params.GetMemBW());
-        double computationTime = info->FLOPS / (params.GetPeakFLOPS()/1e6); //convert from FLOPS/s to FLOPS/us
+        double memMovementTime = totalBytes / (params.GetMemBW()); // memBW is MB/s==B/us
+        double computationTime = info->FLOPS * params.GetCostFLOP(); // Convert from FLOPS/s to FLOPS/us
+        double heapTime = std::log2(static_cast<float>(info->nnzB) / static_cast<float>(info->colsB)) //flops for each col of B
+                            * info->colsB // one for each col of B 
+                            * params.GetCostFLOP(); // constant comptue time 
+        //TODO: What about hashSpGEMM?
                                                                             
 #ifdef PROFILE
         statPtr->Log("Mem movement time: " + std::to_string(memMovementTime));
         statPtr->Log("Computation time: " + std::to_string(computationTime));
+        statPtr->Log("Heap time: " + std::to_string(heapTime));
 #endif
 
-        return memMovementTime + computationTime;
+        return memMovementTime + computationTime + heapTime;
 
     }
 

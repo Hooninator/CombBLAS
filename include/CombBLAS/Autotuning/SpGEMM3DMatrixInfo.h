@@ -12,6 +12,9 @@
 
 namespace combblas {
 namespace autotuning {
+
+enum NNZ_STRAT {NNZ_GLOB_DENSITY, NNZ_LOC_DENSITY, NNZ_ARR};
+
 template <typename IT, typename NT, typename DER>
 class SpGEMM3DMatrixInfo {
 
@@ -22,9 +25,11 @@ public:
     typedef DER seqType;
 
     /* (row,col,nnz) */  
+    //TODO: For col split, no need to store row idx, and for row split, no need to store col idx
     typedef std::vector<std::tuple<IT,IT,IT>> NnzTuples;
 
-    enum SPLIT {COL_SPLIT, ROW_SPLIT} typedef SPLIT;
+    enum SPLIT {COL_SPLIT, ROW_SPLIT}; 
+
 
     //NOTE: loc* are values for the actual 2D processor grid
     SpGEMM3DMatrixInfo(SpParMat3D<IT,NT,DER>& Mat):
@@ -152,9 +157,7 @@ public:
     /* Approximate local nnz using matrix globDensity
      * This actually just computes the avg nnz per processor
      */
-    IT ApproxLocNnzGlobDensity(SpGEMM3DParams& params) {
-
-        auto dims3D = ComputeLocDims3D(params.GetPPN(), params.GetNodes(), params.GetLayers());
+    IT SetLocNnzGlobDensity() {
 
         IT localNcols = std::get<1>(dims3D);
         IT localNrows = std::get<0>(dims3D);
@@ -168,9 +171,7 @@ public:
     /* Approximate local nnz using matrix globDensity
      * This actually just computes the avg nnz per processor
      */
-    IT ApproxLocNnzLocDensity(SpGEMM3DParams& params) {
-
-        auto dims3D = ComputeLocDims3D(params.GetPPN(), params.GetNodes(), params.GetLayers());
+    IT SetLocNnzLocDensity() {
 
         IT localNcols = std::get<1>(dims3D);
         IT localNrows = std::get<0>(dims3D);
@@ -181,24 +182,24 @@ public:
     }
 
 
-    void SetNnzArr(const int ppn, const int nodes, const int layers) {
+    void SetNnzArr(SpGEMM3DParams& params) {
 
         INIT_TIMER();
 
         START_TIMER();
         
         nnzArr->clear();
-        nnzArr->resize(ppn*nodes);
+        nnzArr->resize(params.GetTotalProcs());
 
         switch(split) {
             case COL_SPLIT:
             {
-                SetNnzArrColSplit(ppn,nodes,layers);
+                SetNnzArrColSplit(params);
                 break;
             }
             case ROW_SPLIT:
             {
-                SetNnzArrRowSplit(ppn,nodes,layers);
+                SetNnzArrRowSplit(params);
                 break;
             }
             default:
@@ -213,17 +214,17 @@ public:
 
     /* Given local nnz in initial 2D processor grid, compute nnz per processor in 3D processr grid
      * WITHOUT explicitly forming the 3D processor grid. */
-    void SetNnzArrColSplit(const int ppn, const int nodes, const int layers) {
+    void SetNnzArrColSplit(SpGEMM3DParams& params) {
 
-        const int totalProcs = ppn*nodes;
+        const int totalProcs = params.GetTotalProcs();
 
 #ifdef NNZ_MAT_COL
         // Local nnz array
         std::for_each(nnzTuples->begin(), nnzTuples->end(), 
-            [&ppn,&nodes,&layers,this](auto& t) {
+            [&params,this](auto& t) {
                 int i = std::get<0>(t);
                 int j = std::get<1>(t);
-                int owner = GetOwner3D(ppn, nodes, layers, i*this->locNrows, j, COL_SPLIT);
+                int owner = ComputeOwner3D(params, i*this->locNrows, j, COL_SPLIT);
                 this->nnzArr->at(owner) += std::get<2>(t);
             }
         );
@@ -233,7 +234,7 @@ public:
             int j = colIter.colid();
             for (auto nzIter = locMat->begnz(colIter); nzIter!=locMat->endnz(colIter); nzIter++) {
                 int i = nzIter.rowid();
-                int owner = GetOwner3D(ppn, nodes, layers, i+(colRank*locNrows), j+(rowRank*locNcols), COL_SPLIT);
+                int owner = ComputeOwner3D(params, i+(colRank*locNrows), j+(rowRank*locNcols), COL_SPLIT);
                 nnzArr->at(owner) += 1;
             }
         }
@@ -249,17 +250,17 @@ public:
     }
         
 
-    void SetNnzArrRowSplit(const int ppn, const int nodes, const int layers) {
+    void SetNnzArrRowSplit(SpGEMM3DParams& params) {
 
-        const int totalProcs = nodes*ppn;
+        const int totalProcs = params.GetTotalProcs();
 
 #ifdef NNZ_MAT_ROW
         // Local data
         std::for_each(nnzTuples->begin(), nnzTuples->end(),
-            [&ppn, &nodes, &layers, this](auto& t) {
+            [&params, this](auto& t) {
                 int i = std::get<0>(t);
                 int j = std::get<1>(t);
-                int owner = GetOwner3D(ppn, nodes, layers, i, j*this->locNcols, ROW_SPLIT);
+                int owner = ComputeOwner3D(params, i, j*this->locNcols, ROW_SPLIT);
                 this->nnzArr->at(owner) += std::get<2>(t);
             }
         );
@@ -268,7 +269,7 @@ public:
             int j = colIter.colid();
             for (auto nzIter = locMat->begnz(colIter); nzIter!=locMat->endnz(colIter); nzIter++) {
                 int i = nzIter.rowid();
-                int owner = GetOwner3D(ppn, nodes, layers, i+(colRank*locNrows), j+(rowRank*locNcols), ROW_SPLIT);
+                int owner = ComputeOwner3D(params, i+(colRank*locNrows), j+(rowRank*locNcols), ROW_SPLIT);
                 nnzArr->at(owner) += 1; 
             }
         }
@@ -283,21 +284,28 @@ public:
 
     }
 
+    
+    IT GetLocNnz3D(NNZ_STRAT strat, int procRank) {
+        switch(strat) {
+            case NNZ_GLOB_DENSITY:
+                return SetLocNnzGlobDensity();
+            case NNZ_LOC_DENSITY:
+                return SetLocNnzLocDensity();
+            case NNZ_ARR:
+                return nnzArr->at(procRank);
+            default:
+                UNREACH_ERR();
+        }
+        return 0;
+    }
+
+
     //TODO: Pass SpGEMM3DParams instead of ppn nodes and layers so we don't have to constantly recompute stuff
-    int GetOwner3D(const int ppn, const int nodes, const int layers, const int i, const int j, SPLIT split) {
-
-        auto dims3D = ComputeLocDims3D(ppn,nodes,layers);
-
-        /* Info about currently, actually formed 2D processor grid */
-        const int totalProcs2D = jobPtr->totalTasks;
-        const int procCols2D = RoundedSqrt<int,int>(totalProcs2D);
-        const int procRows2D = procCols2D;
-
-        /* Info about 3D grid */
-        const int totalProcs = ppn*nodes;
-        const int gridSize = totalProcs / layers;
-        const int gridRows = RoundedSqrt<int,int>(gridSize);
-        const int gridCols = gridRows;
+    int ComputeOwner3D(SpGEMM3DParams& params, const int i, const int j, SPLIT split) {
+        
+        const int layers = params.GetLayers();
+        const int gridDim = params.GetGridDim();
+        const int gridSize = params.GetGridSize();
 
         IT locNrows3D = std::get<0>(dims3D);
         IT locNcols3D = std::get<1>(dims3D);
@@ -305,6 +313,7 @@ public:
         IT colDiv;
         IT rowDiv;
         IT layerDiv;
+
         int layerIdx;
         
         if (split==COL_SPLIT) {
@@ -319,11 +328,11 @@ public:
             layerIdx = i;
         }
 
-        const int prow = std::min(static_cast<IT>(i / rowDiv), static_cast<IT>(gridRows-1));
-        const int pcol = std::min(static_cast<IT>(j / colDiv), static_cast<IT>(gridCols-1));
+        const int prow = std::min(static_cast<IT>(i / rowDiv), static_cast<IT>(gridDim-1));
+        const int pcol = std::min(static_cast<IT>(j / colDiv), static_cast<IT>(gridDim-1));
         const int player = std::min(static_cast<IT>((layerIdx / layerDiv)%layers), static_cast<IT>(layers-1));
 
-        return (pcol + prow*gridCols + player*gridSize);
+        return (pcol + prow*gridDim + player*gridSize);
 
     }
 
@@ -338,7 +347,7 @@ public:
     //TODO: This really needs to be partitioned better. Logic for "computing stuff given 3d grid" is inconsistent
     //TODO: All these member functions should accept SpGEMM3DParams instance as argument instead of ppn, nodes, layers..
     // row, column
-    std::pair<IT,IT> ComputeLocDims3D(const int ppn, const int nodes, const int layers) {
+    void SetDims3D(SpGEMM3DParams& params) {
 
         /* Info about currently, actually formed 2D processor grid */
         const int totalProcs2D = jobPtr->totalTasks;
@@ -346,9 +355,12 @@ public:
         const int procRows2D = procCols2D;
 
         /* Info about 3D grid */
-        const int totalProcs = ppn*nodes;
-        const int gridSize = totalProcs / layers;
-        const int gridRows = RoundedSqrt<int,int>(gridSize);
+        const int ppn = params.GetPPN();
+        const int nodes = params.GetNodes();
+        const int layers = params.GetLayers();
+        const int totalProcs = params.GetTotalProcs();
+        const int gridSize = params.GetGridSize();
+        const int gridRows = params.GetGridDim();
         const int gridCols = gridRows;
 
         IT locNcols3D;
@@ -363,8 +375,8 @@ public:
         } else {
             UNREACH_ERR();
         }
-        
-        return std::make_pair(locNrows3D, locNcols3D);
+
+        dims3D = std::make_pair(locNrows3D, locNcols3D);
 
     }
 
@@ -436,6 +448,8 @@ public:
 
     inline std::vector<IT> * GetNnzArr() {return nnzArr;}
 
+    inline std::pair<IT,IT> GetDims3D() {return dims3D;}
+
 private:
 
     // Global info
@@ -465,7 +479,8 @@ private:
 
     // Stores nnz per processor in hypothetical 3D grid
     std::vector<IT> * nnzArr;
-
+    std::pair<IT,IT> dims3D;
+    
 
 };
 
