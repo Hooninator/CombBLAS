@@ -56,13 +56,13 @@ public:
         if (split==COL_SPLIT) {
 #ifdef NNZ_MAT_COL
             START_TIMER();
-            nnzTuples = NnzTuplesCol(Mat); 
+            nnzTuples = NnzTuplesCol(); 
             END_TIMER("nnzTuplesCol Init Time: ");
 #endif
         } else if (split==ROW_SPLIT) {
 #ifdef NNZ_MAT_ROW
             START_TIMER();
-            nnzTuples = NnzTuplesRow(Mat);
+            nnzTuples = NnzTuplesRow();
             END_TIMER("nnzTuplesRow Init Time: ");
 #endif
         }
@@ -73,7 +73,7 @@ public:
 
 
     /* Create sparse matrix storing nnz for each block row of each column and distribute across all ranks  */
-    NnzTuples * NnzTuplesCol(SpParMat3D<IT,NT,DER>& Mat) {
+    NnzTuples * NnzTuplesCol() {
 
         INIT_TIMER();
 
@@ -84,7 +84,7 @@ public:
         
         // Init local data
         int locTupleSize = 0;
-        for (auto colIter = Mat.seqptr()->begcol(); colIter!=Mat.seqptr()->endcol(); colIter++) {
+        for (auto colIter = locMat->begcol(); colIter!=locMat->endcol(); colIter++) {
             if (colIter.nnz()>NNZ_THRESH) {
                 _nnzTuples->push_back( std::tuple<IT,IT,IT>{colRank,  colIter.colid() + locNcols*rowRank, colIter.nnz()} ); 
             }
@@ -105,7 +105,7 @@ public:
 
 
     /* Initialize array containing nnz per row on each processor, then gather on processor 0 */
-    NnzTuples * NnzTuplesRow(SpParMat3D<IT,NT,DER>& Mat) {
+    NnzTuples * NnzTuplesRow() {
 
         INIT_TIMER();
 
@@ -113,8 +113,8 @@ public:
 
         // JB: I can't figure out a way to avoid mutating nnz during iteration, so we can't just use std::tuple
         std::map<std::tuple<IT,IT>, IT> nnzMap;
-        for (auto colIter = Mat.seqptr()->begcol(); colIter != Mat.seqptr()->endcol(); colIter++) {
-            for (auto nzIter = Mat.seqptr()->begnz(colIter); nzIter!=Mat.seqptr()->endnz(colIter); nzIter++) {
+        for (auto colIter = locMat->begcol(); colIter != locMat->endcol(); colIter++) {
+            for (auto nzIter = locMat->begnz(colIter); nzIter!=locMat->endnz(colIter); nzIter++) {
                 std::tuple<IT,IT> t{nzIter.rowid() + locNrows*colRank, rowRank};
                 nnzMap.emplace(t, 0);
                 nnzMap[t] += 1;
@@ -438,29 +438,34 @@ public:
 
 private:
 
+    // Global info
     IT nnz;
     IT ncols;
     IT nrows;
-
+    
+    // Info about actual 2D grid
     IT locNnz;
     IT locNcols;
     IT locNrows;
     IT locNcolsExact;
     IT locNrowsExact;
+    int rowRank; //rank in actual 2d grid
+    int colRank; //^^
 
     float globDensity;
     float locDensity;
 
+    // Row or column split
     SPLIT split;    
-
+    
+    // Stores nnz per row/column
     NnzTuples * nnzTuples;
 
     DER * locMat;
 
+    // Stores nnz per processor in hypothetical 3D grid
     std::vector<IT> * nnzArr;
 
-    int rowRank; //rank in actual 2d grid
-    int colRank; //^^
 
 };
 

@@ -183,27 +183,23 @@ public:
             auto ranksB = Binfo.ColRanks(p, params);
 
             ASSERT(ranksA.size()==ranksB.size(), "ranksA and ranksB should be the same size, instead got " +
-                                                    std::to_string(ranksA.size()) +  "," + std::to_string(ranksB.size()));
+                                            std::to_string(ranksA.size()) +  "," + std::to_string(ranksB.size()));
 
             for (int i=0; i<ranksA.size(); i++) {
                 int rankA = ranksA[i];
                 int rankB = ranksB[i];
-                //TODO: Replace this with a proper constructor
                 LocalSpGEMMInfo<AIT, BIT> * info = new LocalSpGEMMInfo<AIT, BIT> 
-                                                    { 0, //placeholder 
+                                                    { -1, //placeholder 
                                                     std::get<0>(Adims3D), std::get<1>(Adims3D),
                                                     std::get<0>(Bdims3D), std::get<1>(Bdims3D),
-                                                    Ainfo.GetNnzArr()->at(p), 
-                                                    Binfo.GetNnzArr()->at(p),
-                                                    static_cast<float>(Ainfo.GetNnz())/
-                                                        static_cast<float>(Ainfo.GetNcols()*Ainfo.GetNrows()),
-                                                    static_cast<float>(Ainfo.GetNnzArr()->at(p))/
-                                                        static_cast<float>(std::get<0>(Adims3D)*std::get<1>(Adims3D)),
-                                                    static_cast<float>(Binfo.GetNnz())/
-                                                        static_cast<float>(Binfo.GetNcols()*Binfo.GetNrows()),
-                                                    static_cast<float>(Binfo.GetNnzArr()->at(p))/
-                                                    static_cast<float>(std::get<0>(Bdims3D)*std::get<1>(Bdims3D))};
-                info->SetFLOPSGlobalDensity(params);
+                                                    Ainfo.GetNnzArr()->at(rankA), 
+                                                    Binfo.GetNnzArr()->at(rankB),
+                                                    Ainfo.GetGlobDensity(),
+                                                    Ainfo.GetLocDensity(),
+                                                    Binfo.GetGlobDensity(),
+                                                    Binfo.GetLocDensity()};
+                //info->SetFLOPSGlobalDensity(params);
+                info->SetFLOPSPreciseNnz(params);
                 localSpGEMMTimes->push_back(model->Time(info));
             }
 
