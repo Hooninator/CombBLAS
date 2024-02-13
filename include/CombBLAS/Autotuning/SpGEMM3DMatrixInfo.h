@@ -49,13 +49,18 @@ public:
         rowRank(Mat.getcommgrid()->GetCommGridLayer()->GetRankInProcRow()),
         colRank(Mat.getcommgrid()->GetCommGridLayer()->GetRankInProcCol()),
 
-        nnzArr(new std::vector<IT>(0))
+        nnzArr(new std::vector<IT>(0)),
+        locDensityArr(new std::vector<float>(worldSize))
      {
         
         INIT_TIMER();
 
         globDensity = static_cast<float>(nnz) / static_cast<float>(ncols*nrows);
-        locDensity = static_cast<float>(locNnz) / static_cast<float>(locNcolsExact*locNrowsExact);
+
+        locDensityArr->insert(locDensityArr->begin() + rank, 
+                                static_cast<float>(locNnz) / static_cast<float>(locNcolsExact*locNrowsExact));
+        MPI_Allgather(MPI_IN_PLACE, 1, MPI_FLOAT, (void*)(locDensityArr->data()), 1, MPI_FLOAT, MPI_COMM_WORLD); 
+
         split = Mat.isColSplit() ? COL_SPLIT : ROW_SPLIT;
         
         if (split==COL_SPLIT) {
@@ -157,7 +162,7 @@ public:
     /* Approximate local nnz using matrix globDensity
      * This actually just computes the avg nnz per processor
      */
-    IT SetLocNnzGlobDensity() {
+    IT ComputeLocNnzGlobDensity() {
 
         IT localNcols = std::get<1>(dims3D);
         IT localNrows = std::get<0>(dims3D);
@@ -168,16 +173,15 @@ public:
     }
 
 
-    /* Approximate local nnz using matrix globDensity
-     * This actually just computes the avg nnz per processor
+    /* Approximate local nnz using matrix locDensityArr
      */
-    IT SetLocNnzLocDensity() {
+    IT ComputeLocNnzLocDensity(int procRank) {
 
         IT localNcols = std::get<1>(dims3D);
         IT localNrows = std::get<0>(dims3D);
         IT localMatSize = localNcols * localNrows;
 
-        IT localNnzApprox = static_cast<IT>(locDensity * localMatSize);
+        IT localNnzApprox = static_cast<IT>(locDensityArr->at(procRank) * localMatSize);
         return localNnzApprox;
     }
 
@@ -288,9 +292,9 @@ public:
     IT GetLocNnz3D(NNZ_STRAT strat, int procRank) {
         switch(strat) {
             case NNZ_GLOB_DENSITY:
-                return SetLocNnzGlobDensity();
+                return ComputeLocNnzGlobDensity();
             case NNZ_LOC_DENSITY:
-                return SetLocNnzLocDensity();
+                return ComputeLocNnzLocDensity(procRank);
             case NNZ_ARR:
                 return nnzArr->at(procRank);
             default:
@@ -442,7 +446,7 @@ public:
     inline IT GetLocNrows() const {return locNrows;}
 
     inline float GetGlobDensity() const {return globDensity;}
-    inline float GetLocDensity() const {return locDensity;}
+    inline std::vector<float> * GetLocDensityArr() const {return locDensityArr;}
 
     inline SPLIT GetSplit() const {return split;}
 
@@ -467,7 +471,7 @@ private:
     int colRank; //^^
 
     float globDensity;
-    float locDensity;
+    std::vector<float> * locDensityArr;
 
     // Row or column split
     SPLIT split;    

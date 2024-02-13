@@ -198,10 +198,10 @@ public:
                                                     Ainfo.GetLocNnz3D(NNZ_ARR,rankA), 
                                                     Binfo.GetLocNnz3D(NNZ_ARR,rankB),
                                                     Ainfo.GetGlobDensity(),
-                                                    Ainfo.GetLocDensity(),
+                                                    Ainfo.GetLocDensityArr()->at(rankA),
                                                     Binfo.GetGlobDensity(),
-                                                    Binfo.GetLocDensity()};
-                info->SetFLOPS(params, FLOPS_NNZ);
+                                                    Binfo.GetLocDensityArr()->at(rankB)};
+                info->SetFLOPS(params, FLOPS_LOC_DENSITY);
                 localSpGEMMTimes->push_back(model->Time(info));
             }
 
@@ -214,6 +214,8 @@ public:
                 return std::max(currMax, currElem);
             }
         );
+
+        delete localSpGEMMTimes;
 
 #ifdef PROFILE
         auto etime1 = MPI_Wtime();

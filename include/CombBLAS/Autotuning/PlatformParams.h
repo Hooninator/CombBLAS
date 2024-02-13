@@ -24,12 +24,12 @@ public:
     //all memory things are bytes/us
     PlatformParams(float internodeAlpha, float internodeBeta, float intranodeBeta, 
                     int coresPerNode, int devsPerNode, 
-                    long peakFLOPS, float costFLOP, long memBW): 
+                    long peakFLOPS, float costFLOP, long memBW, float costMem): 
         internodeAlpha(internodeAlpha), internodeBeta(internodeBeta), intranodeBeta(intranodeBeta), 
 
         coresPerNode(coresPerNode), devsPerNode(devsPerNode),
 
-        peakFLOPS(peakFLOPS), costFLOP(costFLOP), memBW(memBW)
+        peakFLOPS(peakFLOPS), costFLOP(costFLOP), memBW(memBW), costMem(costMem)
     {}
     ~PlatformParams(){}
     
@@ -43,6 +43,7 @@ public:
     inline long GetPeakFLOPS() const {return peakFLOPS;}
     inline float GetCostFLOP() const {return costFLOP;}
     inline long GetMemBW() const {return memBW;}
+    inline float GetCostMem() const {return costMem;}
     
     float MeasureInternodeAlpha() {throw std::runtime_error("Not implemented");}
     float MeasureInternodeBeta() {throw std::runtime_error("Not implemented");}
@@ -62,6 +63,7 @@ private:
     long peakFLOPS; //peak flops on a SINGLE core 
     float costFLOP;
     long memBW;
+    float costMem;
     
 };
 
@@ -72,8 +74,9 @@ PlatformParams perlmutterParams(3.9, //alpha
                                 4234.33, //intranode beta
                                 128, 4, //cores, gpus
                                 (3.5*1e9)*2*2*8, //peak FLOPS
-                                1, // time for single FLOP in us, totally random
-                                43478 //memBW
+                                5.2e-9, // time for single FLOP in us, measured using simple benchmark 
+                                43478, //memBW
+                                1e-3     // cost for memory movement
                                 );
 
 } //autotuning
