@@ -67,16 +67,16 @@ private:
     
 };
 
-//Values obtained with osu microbenchmarks
+// Values for beta and alpha obtained with osu microbenchmarks
 // peak = 3.5Ghz * 2 fmadd * 2 pipelines * 8 flops per vector register
 PlatformParams perlmutterParams(3.9, //alpha 
                                 2398.54, //internode beta
                                 4234.33, //intranode beta
                                 128, 4, //cores, gpus
                                 (3.5*1e9)*2*2*8, //peak FLOPS
-                                5.2e-9, // time for single FLOP in us, measured using simple benchmark 
-                                43478, //memBW
-                                1e-3     // cost for memory movement
+                                5.2e-9, //time for single FLOP in us, measured using simple benchmark 
+                                39598, //memBW, measured using STREAM
+                                1e-3   //cost for memory movement, right now totally random
                                 );
 
 } //autotuning

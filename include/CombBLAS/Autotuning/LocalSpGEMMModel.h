@@ -42,7 +42,7 @@ struct LocalSpGEMMInfo {
                 SetFLOPSLocalDensity(params);
                 break;
             case FLOPS_NNZ:
-                SetFLOPSNnzArr(params);
+                SetFLOPSNnz(params);
                 break;
             default:
                 UNREACH_ERR();
@@ -80,12 +80,10 @@ struct LocalSpGEMMInfo {
     }
 
 
-    /* Approximate local FLOPS using actual nnzA and nnzB */
-    void SetFLOPSNnzArr(SpGEMM3DParams& params) {
+    /* Approximate local FLOPS using  nnzA and nnzB */
+    void SetFLOPSNnz(SpGEMM3DParams& params) {
 
-        long long tileFLOPS = (nnzA/colsA) * // estimate nnz per col of A
-                        (nnzB/colsB)  * // estimate nnz per col of B
-                        colsB ; // once per col of B
+        long long tileFLOPS = nnzA*nnzB; 
                             
 #ifdef PROFILE
         statPtr->Log("Tile FLOPS-Precise Nnz: " + std::to_string(tileFLOPS));
@@ -121,27 +119,24 @@ public:
 
     double Time(LocalSpGEMMInfo<AIT, BIT> * info) {
 
-        ASSERT(info->FLOPS>-1, "FLOPS for localSpGEMM should not be -1");
+        ASSERT(info->FLOPS>-1, "FLOPS for localSpGEMM should be a positive number, but got " + std::to_string(info->FLOPS));
 
         AIT bytesReadA = info->nnzA*sizeof(ANT) + info->nnzA*sizeof(AIT) + info->nnzA*sizeof(AIT); 
         BIT bytesReadB = info->nnzB*sizeof(BNT) + info->nnzB*sizeof(BIT) + info->nnzB*sizeof(BIT); 
 
         AIT totalBytes = bytesReadA + bytesReadB; //TODO: cast as whichever type is larger
 
-        double memMovementTime = totalBytes / (params.GetMemBW()); // memBW is MB/s==B/us
-        double computationTime = info->FLOPS * params.GetCostFLOP(); // Convert from FLOPS/s to FLOPS/us
-        double heapTime = std::log2(static_cast<float>(info->nnzB) / static_cast<float>(info->colsB)) //flops for each col of B
-                            * info->colsB // one for each col of B 
-                            * params.GetCostFLOP(); // constant comptue time 
+        double memMovementTime = totalBytes/params.GetMemBW(); // memBW is MB/s==B/us
+        double computationTime = info->FLOPS * params.GetCostFLOP() + std::log2(info->nnzB);  //heap cost
+                                                                                              
         //TODO: What about hashSpGEMM?
-                                                                            
+
 #ifdef PROFILE
         statPtr->Log("Mem movement time: " + std::to_string(memMovementTime));
         statPtr->Log("Computation time: " + std::to_string(computationTime));
-        statPtr->Log("Heap time: " + std::to_string(heapTime));
 #endif
 
-        return memMovementTime + computationTime + heapTime;
+        return memMovementTime + computationTime;
 
     }
 
