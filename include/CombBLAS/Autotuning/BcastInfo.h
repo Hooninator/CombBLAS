@@ -29,10 +29,10 @@ enum BcastAlgorithm {
 //TODO: This is scuffed. We need to see if it works for larger node counts/other matrices
 template <typename IT>
 BcastAlgorithm SelectBcastAlgSimple(IT msgSize, int commSize) {
-	if (msgSize==0 || commSize==0)
-		return BCAST_NONE;
 	BcastAlgorithm alg;
-	if (msgSize < 49000000)
+    if (msgSize==0 || commSize==0)
+        alg=BCAST_NONE;
+    else if (msgSize < 49000000)
 		alg=BCAST_BIN_TREE;
 	else if (msgSize < 190000000)
 		alg=BCAST_CHAIN;
@@ -40,6 +40,10 @@ BcastAlgorithm SelectBcastAlgSimple(IT msgSize, int commSize) {
 		alg=BCAST_KNOMIAL;
 	return alg;
 }
+
+
+BcastAlgorithm SelectBcastAlgTree() {return BCAST_BIN_TREE;}
+
 
 //JB: See https://github.com/open-mpi/ompi/blob/f0261cbef73897133177f17351b80eee6111f1bf/ompi/mca/coll/tuned/coll_tuned_decision_fixed.c#L512
 // This is pretty much ripped from this function
@@ -123,7 +127,8 @@ BcastAlgorithm SelectBcastAlg(IT msgSize, int commSize) {
 template <typename IT>
 CommInfo<IT> * MakeBcastCommInfo(const int bcastWorldSize,  const IT msgSize) {
 
-	BcastAlgorithm alg = SelectBcastAlg(msgSize, bcastWorldSize);
+	BcastAlgorithm alg = SelectBcastAlgSimple(msgSize, bcastWorldSize);
+	//BcastAlgorithm alg = SelectBcastAlgTree();
 
 	CommInfo<IT> * info = new CommInfo<IT>();
 
@@ -206,8 +211,8 @@ CommInfo<IT> * MakeBcastCommInfo(const int bcastWorldSize,  const IT msgSize) {
 	}
 
 #ifdef DEBUG
-	//debugPtr->Log("Bcast algorithm: " + std::to_string(alg));
-	//debugPtr->Log("Msg size: " + std::to_string(msgSize));
+	debugPtr->Log("Bcast algorithm: " + std::to_string(alg));
+	debugPtr->Log("Msg size: " + std::to_string(msgSize));
 	//debugPtr->Log("Send bytes estimate: " + std::to_string(info->numBytes));
 	//debugPtr->Log("Num msgs estimate: " + std::to_string(info->numMsgs));
 #endif
