@@ -53,6 +53,12 @@ public:
 
 #ifdef DEBUG
         debugPtr->Log(params.OutStr());
+        debugPtr->Print0(params.OutStr());
+#endif
+
+#ifdef PROFILE
+        infoPtr->Put("Nodes", std::to_string(params.GetNodes()));
+        infoPtr->Put("PPN", std::to_string(params.GetPPN()));
 #endif
 
         auto Ainfo = inputs.Ainfo;
@@ -63,8 +69,8 @@ public:
         Binfo.SetDims3D(params);
 
         // Compute nnz per tile in hypothetical 3D grid
-        Ainfo.SetNnzArr(params);
-        Binfo.SetNnzArr(params);
+        Ainfo.ComputeNnzArr(params);
+        Binfo.ComputeNnzArr(params);
 
         //BROADCAST
         CommModel<AIT> *bcastModel = new PostCommModel<AIT>(platformParams.GetInternodeAlpha(),
@@ -78,9 +84,9 @@ public:
         double localMultTime = LocalMultTime(localMultModel, Ainfo, Binfo, params);
 
 #ifdef PROFILE
-        statPtr->Log("BcastA time " + std::to_string(bcastATime/1e6) + "s");
-        statPtr->Log("BcastB time " + std::to_string(bcastBTime/1e6) + "s");
-        statPtr->Log("LocalMult time " + std::to_string(localMultTime/1e6) + "s");
+        infoPtr->Put("bcastTime-A", std::to_string(bcastATime/1e6));
+        infoPtr->Put("bcastTime-B", std::to_string(bcastBTime/1e6));
+        infoPtr->Put("multTime", std::to_string(localMultTime/1e6));
 #endif
 
         delete bcastModel;
@@ -99,7 +105,10 @@ public:
     double BcastTime(CommModel<IT> * bcastModel, SpGEMM3DMatrixInfo<IT,NT,DER>& Minfo, SpGEMM3DParams& params, bool row) {
 
 #ifdef PROFILE
-        auto stime1 = MPI_Wtime();
+        if (row)
+            infoPtr->StartTimer("bcastCalcTime-A");
+        else
+            infoPtr->StartTimer("bcastCalcTime-B");
 #endif
 
         std::vector<IT> * nnz3D = Minfo.GetNnzArr();
@@ -152,10 +161,13 @@ public:
         );
 
 #ifdef PROFILE
-        auto etime1 = MPI_Wtime();
-        auto t1 = (etime1-stime1);
-        statPtr->Log("Bcast calc time " + std::to_string(t1) + "s");
-        statPtr->Print("Bcast calc time " + std::to_string(t1) + "s");
+        if (row) {
+            infoPtr->EndTimer("bcastCalcTime-A");
+            infoPtr->Print("bcastCalcTime-A");
+        } else {
+            infoPtr->EndTimer("bcastCalcTime-B");
+            infoPtr->Print("bcastCalcTime-B");
+        }
 #endif
 
         return finalTime;
@@ -170,7 +182,7 @@ public:
                             SpGEMM3DMatrixInfo<BIT,BNT,BDER>& Binfo,
                             SpGEMM3DParams& params) {
 #ifdef PROFILE
-        auto stime1 = MPI_Wtime();
+        infoPtr->StartTimer("multCalcTime");
 #endif
         
         auto Adims3D = Ainfo.GetDims3D(); 
@@ -218,10 +230,8 @@ public:
         delete localSpGEMMTimes;
 
 #ifdef PROFILE
-        auto etime1 = MPI_Wtime();
-        auto t1 = (etime1-stime1);
-        statPtr->Log("LocalMult calc time " + std::to_string(t1) + "s");
-        statPtr->Print("LocalMult calc time " + std::to_string(t1) + "s");
+        infoPtr->EndTimer("multCalcTime");
+        infoPtr->Print("multCalcTime");
 #endif
 
         return finalTime;

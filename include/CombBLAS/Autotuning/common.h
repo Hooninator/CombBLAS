@@ -41,10 +41,11 @@
 #include "CombBLAS/SpParMat3D.h"
 #include "CombBLAS/SpParMat.h"
 #include "Logger.h"
+#include "InfoLog.h"
 
 
 #define PROFILE 
-#define DEBUG
+//#define DEBUG
 
 #define ASSERT(condition, message) \
     do { \
@@ -58,24 +59,6 @@
 
 #define UNREACH_ERR() throw std::runtime_error("Never should have come here...");
 
-#ifdef PROFILE
-
-#define INIT_TIMER() auto stime = MPI_Wtime(); auto etime = MPI_Wtime();
-#define START_TIMER() stime = MPI_Wtime();
-#define END_TIMER(message) \
-    do { \
-        etime = MPI_Wtime(); \
-        statPtr->Print(message + std::to_string(etime - stime)); \
-        statPtr->Log(message + std::to_string(etime - stime)); \
-    } while (false)
-
-#else
-
-#define INIT_TIMER() 
-#define START_TIMER() 
-#define END_TIMER(message) 
-
-#endif
 
 #ifdef DEBUG
 
@@ -156,7 +139,7 @@ bool initCalled = false;
 
 JobInfo *jobPtr = nullptr;
 Logger *debugPtr = nullptr;
-Logger *statPtr = nullptr;
+InfoLog *infoPtr = nullptr;
 
 void Init(JobManager jm) {
 
@@ -164,7 +147,6 @@ void Init(JobManager jm) {
     MPI_Initialized(&initialized);
     ASSERT(initialized==1, "Please call MPI_Init() before calling this function");
 
-    //upcxx::init();
 
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &worldSize);
@@ -190,18 +172,12 @@ void Finalize() {
     
     ASSERT(initCalled, "Please call autotuning::Init() first");
 
-#ifdef PROFILE
-    delete statPtr;
-#endif
-
 #ifdef DEBUG
     delete debugPtr;
 #endif
 
     delete jobPtr;
     
-    //upcxx::finalize();
-
 }
 
 

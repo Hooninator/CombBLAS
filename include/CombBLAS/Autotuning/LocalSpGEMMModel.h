@@ -57,7 +57,6 @@ struct LocalSpGEMMInfo {
                         colsB ; // once per col of B
 
 #ifdef PROFILE
-        statPtr->Log("Tile FLOPS-Global Density: " + std::to_string(tileFLOPS));
 #endif
 
         FLOPS = tileFLOPS;
@@ -72,7 +71,6 @@ struct LocalSpGEMMInfo {
                         colsB ; // once per col of B
 
 #ifdef PROFILE
-        statPtr->Log("Tile FLOPS-Local Density: " + std::to_string(tileFLOPS));
 #endif
 
         FLOPS = tileFLOPS;
@@ -86,7 +84,6 @@ struct LocalSpGEMMInfo {
         long long tileFLOPS = nnzA*nnzB; 
                             
 #ifdef PROFILE
-        statPtr->Log("Tile FLOPS-Precise Nnz: " + std::to_string(tileFLOPS));
 #endif
 
         FLOPS = tileFLOPS;
@@ -132,8 +129,6 @@ public:
         //TODO: What about hashSpGEMM?
 
 #ifdef PROFILE
-        statPtr->Log("Mem movement time: " + std::to_string(memMovementTime));
-        statPtr->Log("Computation time: " + std::to_string(computationTime));
 #endif
 
         return memMovementTime + computationTime;

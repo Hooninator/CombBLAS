@@ -7,8 +7,8 @@
 
 
 #define NNZ_THRESH 0
-#define NNZ_MAT_COL
-//#define NNZ_MAT_ROW
+#define NNZ_TUPLES_COL
+//#define NNZ_TUPLES_ROW
 
 namespace combblas {
 namespace autotuning {
@@ -53,7 +53,7 @@ public:
         locDensityArr(new std::vector<float>(worldSize))
      {
         
-        INIT_TIMER();
+        
 
         globDensity = static_cast<float>(nnz) / static_cast<float>(ncols*nrows);
 
@@ -64,16 +64,35 @@ public:
         split = Mat.isColSplit() ? COL_SPLIT : ROW_SPLIT;
         
         if (split==COL_SPLIT) {
-#ifdef NNZ_MAT_COL
-            START_TIMER();
-            nnzTuples = NnzTuplesCol(); 
-            END_TIMER("nnzTuplesCol Init Time: ");
+
+#ifdef NNZ_TUPLES_COL
+
+#ifdef PROFILE
+            infoPtr->StartTimer("nnzTuplesColInit");
 #endif
+
+            nnzTuples = NnzTuplesCol(); 
+
+#ifdef PROFILE
+            infoPtr->EndTimer("nnzTuplesColInit");
+#endif
+
+#endif
+
         } else if (split==ROW_SPLIT) {
-#ifdef NNZ_MAT_ROW
-            START_TIMER();
+
+#ifdef NNZ_TUPLES_ROW
+
+#ifdef PROFILE
+            infoPtr->StartTimer("nnzTuplesRowInit");
+#endif
+
             nnzTuples = NnzTuplesRow();
-            END_TIMER("nnzTuplesRow Init Time: ");
+
+#ifdef PROFILE
+            infoPtr->EndTimer("nnzTuplesRowInit");
+#endif
+
 #endif
         }
 
@@ -85,9 +104,9 @@ public:
     /* Create sparse matrix storing nnz for each block row of each column and distribute across all ranks  */
     NnzTuples * NnzTuplesCol() {
 
-        INIT_TIMER();
+        
 
-        START_TIMER();
+        infoPtr->StartTimer("locNnzTuplesColInit");
 
         auto _nnzTuples = new std::vector<std::tuple<IT,IT,IT>>;
         _nnzTuples->reserve(locNcolsExact);
@@ -100,7 +119,7 @@ public:
             }
         }
 
-        END_TIMER("Time for local tuple construction in col mat: ");
+        infoPtr->EndTimer("locNnzTuplesColInit");
 
 #ifdef DEBUG
         debugPtr->Log("locNnzTuples col");
@@ -117,9 +136,9 @@ public:
     /* Initialize array containing nnz per row on each processor, then gather on processor 0 */
     NnzTuples * NnzTuplesRow() {
 
-        INIT_TIMER();
+        
 
-        START_TIMER();
+        infoPtr->StartTimer("locNnzTuplesRowInit");
 
         // JB: I can't figure out a way to avoid mutating nnz during iteration, so we can't just use std::tuple
         std::map<std::tuple<IT,IT>, IT> nnzMap;
@@ -131,9 +150,6 @@ public:
             }
         }
 
-        END_TIMER("Time for local nnzMap construction in row mat: ");
-
-        START_TIMER();
 
         auto  _nnzTuples = new std::vector<std::tuple<IT,IT,IT>>;
         _nnzTuples->reserve(locNrowsExact);
@@ -145,7 +161,7 @@ public:
             }
         );
         
-        END_TIMER("Time for local tuple construction in row mat: ");
+        infoPtr->EndTimer("locNnzTuplesRowInit");
 
 #ifdef DEBUG
         debugPtr->Log("locNnzTuples row");
@@ -186,11 +202,11 @@ public:
     }
 
 
-    void SetNnzArr(SpGEMM3DParams& params) {
+    void ComputeNnzArr(SpGEMM3DParams& params) {
 
-        INIT_TIMER();
-
-        START_TIMER();
+#ifdef PROFILE
+        infoPtr->StartTimer("Compute3DNnzArr");
+#endif
         
         nnzArr->clear();
         nnzArr->resize(params.GetTotalProcs());
@@ -198,12 +214,12 @@ public:
         switch(split) {
             case COL_SPLIT:
             {
-                SetNnzArrColSplit(params);
+                ComputeNnzArrColSplit(params);
                 break;
             }
             case ROW_SPLIT:
             {
-                SetNnzArrRowSplit(params);
+                ComputeNnzArrRowSplit(params);
                 break;
             }
             default:
@@ -212,17 +228,20 @@ public:
             }
         }
 
-        END_TIMER("Compute 3D nnz time: ");
+#ifdef PROFILE
+        infoPtr->EndTimer("Compute3DNnzArr");
+#endif
+
     }
 
 
     /* Given local nnz in initial 2D processor grid, compute nnz per processor in 3D processr grid
      * WITHOUT explicitly forming the 3D processor grid. */
-    void SetNnzArrColSplit(SpGEMM3DParams& params) {
+    void ComputeNnzArrColSplit(SpGEMM3DParams& params) {
 
         const int totalProcs = params.GetTotalProcs();
 
-#ifdef NNZ_MAT_COL
+#ifdef NNZ_TUPLES_COL
         // Local nnz array
         std::for_each(nnzTuples->begin(), nnzTuples->end(), 
             [&params,this](auto& t) {
@@ -254,11 +273,11 @@ public:
     }
         
 
-    void SetNnzArrRowSplit(SpGEMM3DParams& params) {
+    void ComputeNnzArrRowSplit(SpGEMM3DParams& params) {
 
         const int totalProcs = params.GetTotalProcs();
 
-#ifdef NNZ_MAT_ROW
+#ifdef NNZ_TUPLES_ROW
         // Local data
         std::for_each(nnzTuples->begin(), nnzTuples->end(),
             [&params, this](auto& t) {
