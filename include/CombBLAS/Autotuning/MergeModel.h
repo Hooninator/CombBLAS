@@ -27,6 +27,9 @@ public:
 /* Use Sampled Compression Ratio to estimate nnz in output tile */
 class MergeModelCompression : public MergeModel {
 
+public:
+    MergeModelCompression(MergeInfo * info) {
+    }
 
 
 };

@@ -5,8 +5,8 @@
 #define BCASTINFO_H
 
 #include "common.h"
-#include "SpGEMM3DMatrixInfo.h"
-#include "SpGEMM3DParams.h"
+#include "SpParMatInfo.h"
+#include "SpGEMMParams.h"
 #include "PlatformParams.h"
 #include "CommModel.h"
 
@@ -213,8 +213,6 @@ CommInfo<IT> * MakeBcastCommInfo(const int bcastWorldSize,  const IT msgSize) {
 #ifdef DEBUG
 	debugPtr->Log("Bcast algorithm: " + std::to_string(alg));
 	debugPtr->Log("Msg size: " + std::to_string(msgSize));
-	//debugPtr->Log("Send bytes estimate: " + std::to_string(info->numBytes));
-	//debugPtr->Log("Num msgs estimate: " + std::to_string(info->numMsgs));
 #endif
 
 	return info;

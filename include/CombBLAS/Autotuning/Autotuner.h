@@ -4,8 +4,8 @@
 
 
 #include "common.h"
-#include "SpGEMM3DModel.h"
-#include "SpGEMM3DParams.h"
+#include "SpGEMM2DModel.h"
+#include "SpGEMMParams.h"
 #include "PlatformParams.h"
 
 namespace combblas {
@@ -43,7 +43,7 @@ public:
     /* Main tuning routine for CPU 3DSpGEMM */
     //TODO: Make the tuning method parameter a std::function instance
     template <typename AIT, typename ANT, typename ADER, typename BIT, typename BNT, typename BDER>
-    SpGEMM3DParams TuneSpGEMM3D(SpParMat<AIT, ANT, ADER>& A, SpParMat<BIT, BNT, BDER>& B, TuningMethod method,
+    SpGEMMParams TuneSpGEMM2D(SpParMat<AIT, ANT, ADER>& A, SpParMat<BIT, BNT, BDER>& B, TuningMethod method,
                                     std::string& matpathA, std::string& matpathB){
 
 #ifdef PROFILE
@@ -53,20 +53,17 @@ public:
 #endif
 
 #ifdef PROFILE
-        infoPtr->StartTimerGlobal("TuneSpGEMM3D");
+        infoPtr->StartTimerGlobal("TuneSpGEMM2D");
 #endif
         
-        SpParMat3D<AIT, ANT, ADER> A3D(A, 1, true, false);
-        SpParMat3D<BIT, BNT, BDER> B3D(B, 1, false, false);
-    
-        SpGEMM3DInputs<AIT,ANT,ADER,BIT,BNT,BDER> inputs(A3D, B3D);
+        SpGEMM2DInputs<AIT,ANT,ADER,BIT,BNT,BDER> inputs(A, B);
         
-        SpGEMM3DParams resultParams; 
+        SpGEMMParams resultParams; 
         
         switch(method) {
             case BRUTE_FORCE:
             {
-                resultParams = SearchBruteForce<SpGEMM3DParams, SpGEMM3DModel>(inputs); 
+                resultParams = SearchBruteForce<SpGEMMParams, SpGEMM2DModel>(inputs); 
                 break;
             }
             default:
@@ -76,8 +73,8 @@ public:
         }
 
 #ifdef PROFILE
-        infoPtr->EndTimerGlobal("TuneSpGEMM3D");
-        infoPtr->PrintGlobal("TuneSpGEMM3D");
+        infoPtr->EndTimerGlobal("TuneSpGEMM2D");
+        infoPtr->PrintGlobal("TuneSpGEMM2D");
 #endif
 
 #ifdef PROFILE
@@ -90,10 +87,6 @@ public:
     }
 
 
-    /* Main tuning routine for GPU 3DSpGEMM */
-    template <typename AIT, typename ANT, typename ADER, typename BIT, typename BNT, typename BDER>
-    SpGEMM3DParams TuneSpGEMM3DGPU() {/*TODO*/}
-
     
     template <typename P, typename M, typename I>
     P SearchBruteForce(I& input) {
@@ -102,7 +95,7 @@ public:
         infoPtr->StartTimerGlobal("BruteForceSearch");
 #endif
 
-        auto searchSpace = P::ConstructSearchSpace(platformParams);
+        auto searchSpace = P::ConstructSearchSpace2D(platformParams);
         ASSERT(searchSpace.size()>0, "Search space is of size 0!");
 
 #ifdef PROFILE

@@ -3,7 +3,7 @@
 #define LOCALSPGEMMMODEL_H
 
 #include "common.h"
-#include "SpGEMM3DMatrixInfo.h"
+#include "SpParMatInfo.h"
 #include "PlatformParams.h"
 
 namespace combblas {
@@ -33,7 +33,7 @@ struct LocalSpGEMMInfo {
     float globDensityB;
     float locDensityB;
 
-    void SetFLOPS(SpGEMM3DParams& params, FLOPS_STRAT strat) {
+    void SetFLOPS(SpGEMMParams& params, FLOPS_STRAT strat) {
         switch(strat) {
             case FLOPS_GLOB_DENSITY:
                 SetFLOPSGlobalDensity(params);
@@ -50,7 +50,7 @@ struct LocalSpGEMMInfo {
     }
 
     /* Approximate local FLOPS using global density-based nnz estimation */
-    void SetFLOPSGlobalDensity(SpGEMM3DParams& params) {
+    void SetFLOPSGlobalDensity(SpGEMMParams& params) {
 
         long long tileFLOPS = globDensityA * (rowsA) * // estimate nnz per col of A
                         globDensityB * rowsB * // estimate nnz per col of B
@@ -64,7 +64,7 @@ struct LocalSpGEMMInfo {
     }
 
     /* Approximate local FLOPS using global density-based nnz estimation */
-    void SetFLOPSLocalDensity(SpGEMM3DParams& params) {
+    void SetFLOPSLocalDensity(SpGEMMParams& params) {
 
         long long tileFLOPS = locDensityA * (rowsA) * // estimate nnz per col of A
                         locDensityB * rowsB * // estimate nnz per col of B
@@ -79,7 +79,7 @@ struct LocalSpGEMMInfo {
 
 
     /* Approximate local FLOPS using  nnzA and nnzB */
-    void SetFLOPSNnz(SpGEMM3DParams& params) {
+    void SetFLOPSNnz(SpGEMMParams& params) {
 
         long long tileFLOPS = nnzA*nnzB; 
                             
