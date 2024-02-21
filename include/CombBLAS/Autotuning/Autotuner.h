@@ -126,7 +126,7 @@ public:
 
 #ifdef PROFILE
         infoPtr->EndTimerGlobal("BruteForceSearch");
-        infoPtr->PrintGlobal("SearchBruteForce");
+        infoPtr->PrintGlobal("BruteForceSearch");
 #endif
         
         return bestParams;

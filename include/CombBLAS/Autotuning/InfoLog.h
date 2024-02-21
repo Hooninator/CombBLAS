@@ -17,24 +17,24 @@ public:
     /* Timer utilities */
     void StartTimer(const std::string label) { 
         double stime = MPI_Wtime(); 
-        infoMap.emplace(label, std::to_string(stime));
+        infoMap[label]= std::to_string(stime);
     }
 
     void EndTimer(const std::string label) {
         double etime = MPI_Wtime();
         double totalTime = etime - std::stod(infoMap[label]);
-        infoMap.emplace(label, std::to_string(totalTime));
+        infoMap[label] = std::to_string(totalTime);
     }
 
     void StartTimerGlobal(const std::string label) { 
         double stime = MPI_Wtime(); 
-        infoMapGlobal.emplace(label, std::to_string(stime));
+        infoMapGlobal[label] = std::to_string(stime);
     }
 
     void EndTimerGlobal(const std::string label) {
         double etime = MPI_Wtime();
         double totalTime = etime - std::stod(infoMapGlobal[label]);
-        infoMapGlobal.emplace(label, std::to_string(totalTime));
+        infoMapGlobal[label] = std::to_string(totalTime);
     }
     
 
@@ -42,16 +42,17 @@ public:
     void WriteInfo() {
         std::for_each(infoMap.begin(), infoMap.end(),
             [this](auto const& elem) {
-                this->ofs<<elem.first<<":"<<elem.second;
+                this->ofs<<elem.first<<":"<<elem.second<<" ";
             }
         );
         ofs<<std::endl;
     }
 
     void WriteInfoGlobal() {
+        ofs<<"----GLOBALS----"<<std::endl;
         std::for_each(infoMapGlobal.begin(), infoMapGlobal.end(),
             [this](auto const& elem) {
-                this->ofs<<elem.first<<":"<<elem.second;
+                this->ofs<<elem.first<<":"<<elem.second<<" ";
             }
         );
         ofs<<std::endl;
@@ -78,7 +79,7 @@ public:
     }
 
     void Put(const std::string key, const std::string value) {
-        infoMap.emplace(key, value);
+        infoMap[key] = value;
     }
 
     std::string GetGlobal(const std::string label) {
@@ -86,7 +87,7 @@ public:
     }
 
     void PutGlobal(const std::string key, const std::string value) {
-        infoMapGlobal.emplace(key, value);
+        infoMapGlobal[key] = value;
     }
 
 

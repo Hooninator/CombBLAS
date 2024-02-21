@@ -59,6 +59,8 @@ public:
 #ifdef PROFILE
         infoPtr->Put("Nodes", std::to_string(params.GetNodes()));
         infoPtr->Put("PPN", std::to_string(params.GetPPN()));
+        infoPtr->Print("Nodes");
+        infoPtr->Print("PPN");
 #endif
 
         auto Ainfo = inputs.Ainfo;
@@ -113,9 +115,6 @@ public:
 
         std::vector<IT> * nnz2D = Minfo.GetNnzArr();
 
-        if (params.GetGridSize()==1) return 0; //no bcasts in this case
-        
-        
         // Compute local bcast times
         std::vector<double> locBcastTimes(params.GetTotalProcs());
         for (int p=0; p<params.GetTotalProcs(); p++) {
