@@ -36,11 +36,11 @@ public:
 /* Output of tune routine. Relevant SpGEMM3D params that should be used to create a CommGrid3D 
  * Also defines runtime estimation model. TODO: Move that functionality to a dedicated model class
  */
-class SpGEMM2DModel {
+class SpGEMM2DModelAnalytical {
 public:
 
 
-    SpGEMM2DModel(PlatformParams& platformParams ) : platformParams(platformParams)
+    SpGEMM2DModelAnalytical(PlatformParams& platformParams ) : platformParams(platformParams)
     {
 
     }

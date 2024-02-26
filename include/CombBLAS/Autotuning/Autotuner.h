@@ -4,7 +4,7 @@
 
 
 #include "common.h"
-#include "SpGEMM2DModel.h"
+#include "SpGEMM2DModelAnalytical.h"
 #include "SpGEMMParams.h"
 #include "PlatformParams.h"
 
@@ -63,7 +63,7 @@ public:
         switch(method) {
             case BRUTE_FORCE:
             {
-                resultParams = SearchBruteForce<SpGEMMParams, SpGEMM2DModel>(inputs); 
+                resultParams = SearchBruteForce<SpGEMMParams, SpGEMM2DModelAnalytical>(inputs); 
                 break;
             }
             default:
