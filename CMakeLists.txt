@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.3)
 project(CombBLAS VERSION 2.0.1 LANGUAGES C CXX)
 
 # require c++14
-set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED YES)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
@@ -28,9 +28,11 @@ target_include_directories(CombBLAS PRIVATE include/CombBLAS)
 find_package(MPI REQUIRED)
 find_package(OpenMP)
 
-# UPCXX dependency
-#find_package(UPCXX REQUIRED)
-#target_link_libraries(CombBLAS PUBLIC UPCXX::upcxx)
+if(DEFINED XGB_MODEL)
+    add_compile_definitions(XGB_MODEL)
+    find_package(xgboost REQUIRED)
+    target_link_libraries(CombBLAS PUBLIC xgboost::xgboost)
+endif()
 
 if(TARGET MPI::MPI_CXX) # Use target if available (CMake >= 3.9)
   target_link_libraries(CombBLAS PUBLIC MPI::MPI_CXX)

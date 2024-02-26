@@ -4,7 +4,7 @@
 
 
 #include "common.h"
-#include "SpGEMM2DModelAnalytical.h"
+#include "SpGEMM2DModel.h"
 #include "SpGEMMParams.h"
 #include "PlatformParams.h"
 
@@ -40,7 +40,7 @@ public:
     /* TUNING */
     
 
-    /* Main tuning routine for CPU 3DSpGEMM */
+    /* Main tuning routine for CPU 2DSpGEMM */
     //TODO: Make the tuning method parameter a std::function instance
     template <typename AIT, typename ANT, typename ADER, typename BIT, typename BNT, typename BDER>
     SpGEMMParams TuneSpGEMM2D(SpParMat<AIT, ANT, ADER>& A, SpParMat<BIT, BNT, BDER>& B, TuningMethod method,
@@ -63,7 +63,7 @@ public:
         switch(method) {
             case BRUTE_FORCE:
             {
-                resultParams = SearchBruteForce<SpGEMMParams, SpGEMM2DModelAnalytical>(inputs); 
+                resultParams = SearchBruteForce<SpGEMMParams, SpGEMM2DModel<SpGEMM2DModelAnalytical>>(inputs); 
                 break;
             }
             default:

@@ -18,7 +18,6 @@
 #include <numeric>
 #include <utility>
 #include <tuple>
-//#include <upcxx/upcxx.hpp>
 
 #include "CombBLAS/SpMat.h"
 #include "CombBLAS/SpTuples.h"
@@ -42,6 +41,10 @@
 #include "CombBLAS/SpParMat.h"
 #include "Logger.h"
 #include "InfoLog.h"
+
+#ifdef XGB_MODEL
+#include <xgboost/c_api.h>
+#endif
 
 
 #define PROFILE 
