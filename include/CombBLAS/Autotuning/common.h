@@ -218,6 +218,39 @@ std::string TupleStr(const std::tuple<T,T,T>& tuple) {
     return ss.str();
 }
 
+
+template <typename T>
+T ReduceMin(std::vector<T>& v) {
+    return std::reduce(v.begin(), v.end(), T(0),
+        [](T currMin, T curr) {return std::min(currMin, curr);}
+    );
+}
+
+
+template <typename T>
+T ReduceMax(std::vector<T>& v) {
+    return std::reduce(v.begin(), v.end(), T(0),
+        [](T currMax, T curr) {return std::max(currMax, curr);}
+    );
+}
+
+
+template <typename T>
+double ReduceStdev(std::vector<T>& v, double avg) {
+    return std::sqrt(std::reduce(v.begin(), v.end(), 0.0,
+        [&avg](double sum, T val) {
+            return sum + (std::pow( static_cast<double>((val - avg)), 2));
+        }
+    ) / v.size());
+}
+
+
+template <typename T>
+T ReduceMean(std::vector<T>& v) {
+    return std::reduce(v.begin(), v.end(), T(0))/static_cast<T>(v.size());
+}
+
+
 }//autotuning
 }//combblas
 

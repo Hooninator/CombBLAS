@@ -63,7 +63,7 @@ public:
         switch(method) {
             case BRUTE_FORCE:
             {
-                resultParams = SearchBruteForce<SpGEMMParams, SpGEMM2DModel<SpGEMM2DModelAnalytical>>(inputs); 
+                resultParams = SearchBruteForce<SpGEMMParams, SpGEMM2DModel<SpGEMM2DModelXgb>>(inputs); 
                 break;
             }
             default:

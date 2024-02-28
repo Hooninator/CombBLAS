@@ -32,125 +32,192 @@ public:
 
 
     //NOTE: loc* are values for the actual 2D processor grid
-    SpParMatInfo(SpParMat3D<IT,NT,DER>& Mat):
+    //distInfo determines if distribution-specific information, like the array of tile densities, is computed
+    SpParMatInfo(SpParMat3D<IT,NT,DER>& Mat, bool distInfo=true):
         
-        nnz(Mat.getnnz()), ncols(Mat.getncol()), nrows(Mat.getnrow()),
+        locMat(Mat.seqptr()),
 
         locNnz(Mat.seqptr()->getnnz()), 
 
         locNcols(Mat.getncol() / RoundedSqrt<IT,IT>(worldSize)), 
         locNrows(Mat.getnrow() / RoundedSqrt<IT,IT>(worldSize)),
-
         locNcolsExact(Mat.seqptr()->getncol()),
         locNrowsExact(Mat.seqptr()->getnrow()),
 
-        locMat(Mat.seqptr()),
+        nnzArr(new std::vector<IT>(0)),
+        locDensityArr(new std::vector<float>(worldSize)),
 
         rowRank(Mat.getcommgrid()->GetCommGridLayer()->GetRankInProcRow()),
-        colRank(Mat.getcommgrid()->GetCommGridLayer()->GetRankInProcCol()),
+        colRank(Mat.getcommgrid()->GetCommGridLayer()->GetRankInProcCol())
+
+    {
+
+        SetGlobalInfo(Mat);
+
+        SetGlobalColInfo(Mat);
+        
+        if (distInfo) { 
+
+            locDensityArr->insert(locDensityArr->begin() + rank, 
+                                    static_cast<float>(locNnz) / static_cast<float>(locNcolsExact*locNrowsExact));
+            MPI_Allgather(MPI_IN_PLACE, 1, MPI_FLOAT, (void*)(locDensityArr->data()), 1, MPI_FLOAT, MPI_COMM_WORLD); 
+
+            split = Mat.isColSplit() ? COL_SPLIT : ROW_SPLIT;
+            
+            if (split==COL_SPLIT) {
+
+#ifdef NNZ_TUPLES_COL
+
+#ifdef PROFILE
+                infoPtr->StartTimer("nnzTuplesColInit");
+#endif
+                nnzTuples = NnzTuplesCol(); 
+#ifdef PROFILE
+                infoPtr->EndTimer("nnzTuplesColInit");
+#endif
+
+#endif
+
+            } else if (split==ROW_SPLIT) {
+
+#ifdef NNZ_TUPLES_ROW
+
+#ifdef PROFILE
+                infoPtr->StartTimer("nnzTuplesRowInit");
+#endif
+                nnzTuples = NnzTuplesRow();
+#ifdef PROFILE
+                infoPtr->EndTimer("nnzTuplesRowInit");
+#endif
+
+#endif
+            }
+
+            MPI_Barrier(MPI_COMM_WORLD);
+        }
+
+    }
+
+
+    SpParMatInfo(SpParMat<IT,NT,DER>& Mat, bool distInfo=true):
+
+        locMat(Mat.seqptr()),
+        locNnz(Mat.seqptr()->getnnz()), 
+        locNcols(Mat.getncol() / RoundedSqrt<IT,IT>(worldSize)), 
+        locNrows(Mat.getnrow() / RoundedSqrt<IT,IT>(worldSize)),
+        locNcolsExact(Mat.seqptr()->getncol()),
+        locNrowsExact(Mat.seqptr()->getnrow()),
 
         nnzArr(new std::vector<IT>(0)),
-        locDensityArr(new std::vector<float>(worldSize))
-     {
-        
-        
+        locDensityArr(new std::vector<float>(worldSize)),
 
-        globDensity = static_cast<float>(nnz) / static_cast<float>(ncols*nrows);
+        rowRank(Mat.getcommgrid()->GetRankInProcRow()),
+        colRank(Mat.getcommgrid()->GetRankInProcCol())
+    {
 
-        locDensityArr->insert(locDensityArr->begin() + rank, 
-                                static_cast<float>(locNnz) / static_cast<float>(locNcolsExact*locNrowsExact));
-        MPI_Allgather(MPI_IN_PLACE, 1, MPI_FLOAT, (void*)(locDensityArr->data()), 1, MPI_FLOAT, MPI_COMM_WORLD); 
+        SetGlobalInfo(Mat);
 
-        split = Mat.isColSplit() ? COL_SPLIT : ROW_SPLIT;
+        SetGlobalColInfo(Mat);
         
-        if (split==COL_SPLIT) {
+        if (distInfo) {
+
+            locDensityArr->insert(locDensityArr->begin() + rank, 
+                                    static_cast<float>(locNnz) / static_cast<float>(locNcolsExact*locNrowsExact));
+            MPI_Allgather(MPI_IN_PLACE, 1, MPI_FLOAT, (void*)(locDensityArr->data()), 1, MPI_FLOAT, MPI_COMM_WORLD); 
+
+            split = COL_SPLIT; // This is much nicer, and in 2d it doesn't matter
 
 #ifdef NNZ_TUPLES_COL
 
 #ifdef PROFILE
             infoPtr->StartTimer("nnzTuplesColInit");
 #endif
-
             nnzTuples = NnzTuplesCol(); 
-
 #ifdef PROFILE
             infoPtr->EndTimer("nnzTuplesColInit");
 #endif
 
 #endif
-
-        } else if (split==ROW_SPLIT) {
-
-#ifdef NNZ_TUPLES_ROW
-
-#ifdef PROFILE
-            infoPtr->StartTimer("nnzTuplesRowInit");
-#endif
-
-            nnzTuples = NnzTuplesRow();
-
-#ifdef PROFILE
-            infoPtr->EndTimer("nnzTuplesRowInit");
-#endif
-
-#endif
+            MPI_Barrier(MPI_COMM_WORLD);
         }
 
-        MPI_Barrier(MPI_COMM_WORLD);
+    }
+
+    
+    template <typename M>
+    void SetGlobalInfo(M& Mat) {
+        this->nnz = Mat.getnnz();
+        this->ncols = Mat.getncol();
+        this->nrows = Mat.getnrow();
+        this->globDensity = static_cast<float>(this->nnz) / static_cast<float>(this->ncols*this->nrows);
+    }
+
+    
+    // NOTE: need overloaded function here because behavior differs depending on 2d vs 3d
+    void SetGlobalColInfo(SpParMat<IT,NT,DER>& Mat) {
+
+        // avg nnz per column 
+        avgNnzCol = static_cast<float>(Mat.getnnz()) / static_cast<float>(Mat.getncol());
+
+        // avg density per column
+        avgDensityCol = (static_cast<float>(Mat.getnnz()) / static_cast<float>(Mat.getnrow())) / static_cast<float>(Mat.getncol());
+        
+        // Reduce to get complete nnz per column
+        std::vector<IT> nnzColVec(Mat.seqptr()->getncol());
+        float sumNnzMeanDiff;
+
+        for (auto colIter = Mat.seqptr()->begcol(); colIter!=Mat.seqptr()->endcol(); colIter++) {
+            nnzColVec[colIter.colid()] = colIter.nnz();
+            sumNnzMeanDiff += std::pow( (colIter.nnz() - avgNnzCol), 2); 
+        }
+
+        MPI_Allreduce(MPI_IN_PLACE, (void*)(nnzColVec.data()), nnzColVec.size(), MPIType<IT>(), MPI_SUM,
+                    Mat.getcommgrid()->GetColWorld());
+        
+        // Compute column densities
+        std::vector<float> densityColVec(Mat.seqptr()->getncol());
+        float sumDensityMeanDiff;
+
+        std::transform(nnzColVec.begin(), nnzColVec.end(), densityColVec.begin(), 
+                [this, &sumDensityMeanDiff](IT nnz) mutable {
+                    float d = static_cast<float>(nnz) / static_cast<float>(this->nrows);
+                    sumDensityMeanDiff += std::pow( (d - this->avgDensityCol), 2);
+                    return d;
+                }
+        );
+
+        // Local reduce to get min, max and sum for each column block
+        float locMinDensity, locMaxDensity;
+        minNnzCol = ReduceMin(nnzColVec);
+        maxNnzCol = ReduceMax(nnzColVec);
+        minDensityCol = ReduceMin(densityColVec);
+        maxDensityCol = ReduceMax(densityColVec);
+
+        // Global reduce to compute final min, max, and sum
+        // TODO: use nonblocking collectives?
+        MPI_Allreduce(MPI_IN_PLACE, (void*)(&minNnzCol), 1, MPIType<IT>(), MPI_MIN, Mat.getcommgrid()->GetRowWorld());
+        MPI_Allreduce(MPI_IN_PLACE, (void*)(&maxNnzCol), 1, MPIType<IT>(), MPI_MAX, Mat.getcommgrid()->GetRowWorld());
+
+        MPI_Allreduce(MPI_IN_PLACE, (void*)(&minDensityCol), 1, MPI_FLOAT, MPI_MIN, Mat.getcommgrid()->GetRowWorld());
+        MPI_Allreduce(MPI_IN_PLACE, (void*)(&maxDensityCol), 1, MPI_FLOAT, MPI_MAX, Mat.getcommgrid()->GetRowWorld());
+
+        // pack floats that will be summed into single buffer
+        float locBuf[] = {sumNnzMeanDiff, sumDensityMeanDiff};
+        MPI_Allreduce(MPI_IN_PLACE, (void*)(locBuf), 2, MPI_FLOAT, MPI_SUM, Mat.getcommgrid()->GetRowWorld());
+        
+        // finish stdev calculations
+        stdevNnzCol = std::sqrt( sumNnzMeanDiff / Mat.getncol() );
+        stdevDensityCol = std::sqrt( sumDensityMeanDiff / Mat.getncol() );
 
     }
 
 
-    SpParMatInfo(SpParMat<IT,NT,DER>& Mat):
-        
-        nnz(Mat.getnnz()), ncols(Mat.getncol()), nrows(Mat.getnrow()),
-
-        locNnz(Mat.seqptr()->getnnz()), 
-
-        locNcols(Mat.getncol() / RoundedSqrt<IT,IT>(worldSize)), 
-        locNrows(Mat.getnrow() / RoundedSqrt<IT,IT>(worldSize)),
-
-        locNcolsExact(Mat.seqptr()->getncol()),
-        locNrowsExact(Mat.seqptr()->getnrow()),
-
-        locMat(Mat.seqptr()),
-
-        rowRank(Mat.getcommgrid()->GetRankInProcRow()),
-        colRank(Mat.getcommgrid()->GetRankInProcCol()),
-
-        nnzArr(new std::vector<IT>(0)),
-        locDensityArr(new std::vector<float>(worldSize))
-     {
-        
-        globDensity = static_cast<float>(nnz) / static_cast<float>(ncols*nrows);
-
-        locDensityArr->insert(locDensityArr->begin() + rank, 
-                                static_cast<float>(locNnz) / static_cast<float>(locNcolsExact*locNrowsExact));
-        MPI_Allgather(MPI_IN_PLACE, 1, MPI_FLOAT, (void*)(locDensityArr->data()), 1, MPI_FLOAT, MPI_COMM_WORLD); 
-
-        split = COL_SPLIT; // This is much nicer, and in 2d it doesn't matter
-
-#ifdef NNZ_TUPLES_COL
-
-#ifdef PROFILE
-        infoPtr->StartTimer("nnzTuplesColInit");
-#endif
-
-        nnzTuples = NnzTuplesCol(); 
-
-#ifdef PROFILE
-        infoPtr->EndTimer("nnzTuplesColInit");
-#endif
-
-#endif
-        MPI_Barrier(MPI_COMM_WORLD);
-
-    }
-
-    /* Create sparse matrix storing nnz for each block row of each column and distribute across all ranks  */
+    /* Create array of tuples containing nnz per tile column for this processor's local tile  */
     NnzTuples * NnzTuplesCol() {
 
+#ifdef PROFILE
         infoPtr->StartTimer("locNnzTuplesColInit");
+#endif
 
         auto _nnzTuples = new std::vector<std::tuple<IT,IT,IT>>;
         _nnzTuples->reserve(locNcolsExact);
@@ -163,7 +230,9 @@ public:
             }
         }
 
+#ifdef PROFILE
         infoPtr->EndTimer("locNnzTuplesColInit");
+#endif
 
 #ifdef DEBUG
         debugPtr->Log("locNnzTuples col");
@@ -177,10 +246,12 @@ public:
     }
 
 
-    /* Initialize array containing nnz per row on each processor, then gather on processor 0 */
+    /* Initialize array of tuples containing nnz per tile row on this processor's local tile */
     NnzTuples * NnzTuplesRow() {
 
+#ifdef PROFILE
         infoPtr->StartTimer("locNnzTuplesRowInit");
+#endif
 
         // JB: I can't figure out a way to avoid mutating nnz during iteration, so we can't just use std::tuple
         std::map<std::tuple<IT,IT>, IT> nnzMap;
@@ -203,7 +274,9 @@ public:
             }
         );
         
+#ifdef PROFILE
         infoPtr->EndTimer("locNnzTuplesRowInit");
+#endif
 
 #ifdef DEBUG
         debugPtr->Log("locNnzTuples row");
@@ -350,7 +423,7 @@ public:
     }
 
     
-    IT GetLocNnzGrid(NNZ_STRAT strat, int procRank) {
+    IT ComputeLocNnzGrid(NNZ_STRAT strat, int procRank) {
         switch(strat) {
             case NNZ_GLOB_DENSITY:
                 return ComputeLocNnzGlobDensity();
@@ -501,12 +574,22 @@ public:
     inline IT GetNnz() const {return nnz;}
     inline IT GetNcols() const {return ncols;}
     inline IT GetNrows() const {return nrows;}
+    inline float GetGlobDensity() const {return globDensity;}
+
+    inline IT GetAvgNnzCol() const {return avgNnzCol;}
+    inline IT GetMinNnzCol() const {return minNnzCol;}
+    inline IT GetMaxNnzCol() const {return maxNnzCol;}
+    inline IT GetStdevNnzCol() const {return stdevNnzCol;}
+
+    inline IT GetAvgDensityCol() const {return avgDensityCol;}
+    inline IT GetMinDensityCol() const {return minDensityCol;}
+    inline IT GetMaxDensityCol() const {return maxDensityCol;}
+    inline IT GetStdevDensityCol() const {return stdevDensityCol;}
 
     inline IT GetLocNnz() const {return locNnz;}
     inline IT GetLocNcols() const {return locNcols;}
     inline IT GetLocNrows() const {return locNrows;}
 
-    inline float GetGlobDensity() const {return globDensity;}
     inline std::vector<float> * GetLocDensityArr() const {return locDensityArr;}
 
     inline SPLIT GetSplit() const {return split;}
@@ -521,6 +604,17 @@ private:
     IT nnz;
     IT ncols;
     IT nrows;
+    float globDensity;
+
+    // Global column info
+    float avgNnzCol;
+    IT minNnzCol;
+    IT maxNnzCol;
+    float stdevNnzCol;
+    float avgDensityCol;
+    float minDensityCol;
+    float maxDensityCol;
+    float stdevDensityCol;
     
     // Info about actual 2D grid
     IT locNnz;
@@ -530,23 +624,19 @@ private:
     IT locNrowsExact;
     int rowRank; //rank in actual 2d grid
     int colRank; //^^
-
-    float globDensity;
     std::vector<float> * locDensityArr;
+    DER * locMat;
+    NnzTuples * nnzTuples;
 
     // Row or column split
     SPLIT split;    
-    
-    // Stores nnz per row/column
-    NnzTuples * nnzTuples;
-
-    DER * locMat;
 
     // Stores nnz per processor in hypothetical 3D grid
     std::vector<IT> * nnzArr;
+
+    // Dimensions of tile in hypothetical 3D grid
     std::pair<IT,IT> gridDims;
     
-
 };
 
 

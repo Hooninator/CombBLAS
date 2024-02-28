@@ -219,8 +219,8 @@ public:
                                                     { -1, //placeholder 
                                                     std::get<0>(Adims), std::get<1>(Adims),
                                                     std::get<0>(Bdims), std::get<1>(Bdims),
-                                                    Ainfo.GetLocNnzGrid(NNZ_ARR,rankA), 
-                                                    Binfo.GetLocNnzGrid(NNZ_ARR,rankB),
+                                                    Ainfo.ComputeLocNnzGrid(NNZ_ARR,rankA), 
+                                                    Binfo.ComputeLocNnzGrid(NNZ_ARR,rankB),
                                                     Ainfo.GetGlobDensity(),
                                                     Ainfo.GetLocDensityArr()->at(rankA),
                                                     Binfo.GetGlobDensity(),
@@ -257,13 +257,29 @@ public:
 
 
 #ifdef XGB_MODEL
+
 class SpGEMM2DModelXgb : public SpGEMM2DModel<SpGEMM2DModelXgb> {
 public:
     template <typename AIT, typename ANT, typename ADER, typename BIT, typename BNT, typename BDER>
     double EstimateRuntimeImpl(SpGEMM2DInputs<AIT,ANT,ADER,BIT,BNT,BDER>& inputs, SpGEMMParams& params) {
+#ifdef DEBUG
+        debugPtr->Log(params.OutStr());
+        debugPtr->Print0(params.OutStr());
+#endif
+
+#ifdef PROFILE
+        infoPtr->Put("Nodes", std::to_string(params.GetNodes()));
+        infoPtr->Put("PPN", std::to_string(params.GetPPN()));
+        infoPtr->Print("Nodes");
+        infoPtr->Print("PPN");
+#endif
+
+        auto Ainfo = inputs.Ainfo;
+        auto Binfo = inputs.Binfo;
         return 0;
     }
 };
+
 #endif
 
 
