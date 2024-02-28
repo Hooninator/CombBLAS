@@ -93,12 +93,13 @@ public:
 
     
     template <typename P, typename M, typename I>
-    P SearchBruteForce(I& input) {
+    P SearchBruteForce(I& inputs) {
 
 #ifdef PROFILE
         infoPtr->StartTimerGlobal("BruteForceSearch");
 #endif
 
+        //TODO: This makes this routine not generic since not all problems will have a 'searchspace2d' function
         auto searchSpace = P::ConstructSearchSpace2D(platformParams);
         ASSERT(searchSpace.size()>0, "Search space is of size 0!");
 
@@ -113,8 +114,7 @@ public:
 
         for (P currParams : searchSpace) {
 
-
-            double currTime = model.EstimateRuntime(input, currParams);
+            double currTime = model.EstimateRuntime(inputs, currParams);
             if (currTime<=bestTime) {
                 bestTime = currTime;
                 bestParams = currParams;
@@ -135,7 +135,30 @@ public:
         
         return bestParams;
     }
-    
+
+
+#ifdef XGB_MODEL
+    template <typename P, typename M, typename I>
+    P SearchInference(I& inputs) {
+        
+#ifdef PROFILE
+        infoPtr->StartTimerGlobal("InferenceSearch");
+#endif
+
+        auto searchSpace = P::ConstructSearchSpace2D(platformParams);
+
+        M model(PlatformParams);
+
+        float * featureMat;
+        model.MakeFeatureMat(inputs, searchSpace, featureMat);
+
+#ifdef PROFILE
+        infoPtr->EndTimerGlobal("InferenceSearch");
+        infoPtr->PrintGlobal("InferenceSearch");
+#endif
+
+    }
+#endif
 
     ~Autotuner(){}
 

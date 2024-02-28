@@ -40,7 +40,12 @@ public:
     /* Get runtime estimate of a certain combo of parameters */
     template <typename I>
     double EstimateRuntime(I& inputs, SpGEMMParams& params) { 
-        return static_cast<MT *>(this)->EstimateRuntimeImpl(inputs, params);
+        return static_cast<MT*>(this)->EstimateRuntimeImpl(inputs, params);
+    }
+
+    template <typename I>
+    void MakeFeatureMat(I& inputs, std::vector<SpGEMMParams>& searchSpace, float * featureMat) {
+        static_cast<MT*>(this)->MakeFeatureMatImpl(inputs,searchSpace,featureMat);
     }
 
 
@@ -618,19 +623,35 @@ public:
 
 class SpGEMM2DModelXgb : public SpGEMM2DModel<SpGEMM2DModelXgb> {
 public:
+
+    SpGEMM2DModelXgb(PlatformParams& platformParams) :
+        SpGEMM2DModel<SpGEMM2DModelXgb>(platformParams) 
+    {
+        XGB_CHECK(XGBoosterCreate(nullptr, 0, &bstHandle));
+    }
+
     
     template <typename IT, typename NT, typename DER>
     class SpParMatInfoXgb : public SpParMatInfo<IT,NT,DER> {
     public:
+        
+        using SpParMatInfo<IT,NT,DER>::nnz;
+        using SpParMatInfo<IT,NT,DER>::ncols;
+        using SpParMatInfo<IT,NT,DER>::nrows;
+        using SpParMatInfo<IT,NT,DER>::globDensity;
+
         SpParMatInfoXgb(SpParMat<IT,NT,DER>& Mat):
             SpParMatInfo<IT,NT,DER>(Mat)
         {
-
+            SetGlobalColInfo(Mat);    
         }
 
 
 		// NOTE: need overloaded function here because behavior differs depending on 2d vs 3d
 		void SetGlobalColInfo(SpParMat<IT,NT,DER>& Mat) {
+#ifdef PROFILE
+            infoPtr->StartTimer("FeatureCollection");
+#endif
 
 			// avg nnz per column
 			avgNnzCol = static_cast<float>(Mat.getnnz()) / static_cast<float>(Mat.getncol());
@@ -684,6 +705,10 @@ public:
 			// finish stdev calculations
 			stdevNnzCol = std::sqrt( sumNnzMeanDiff / Mat.getncol() );
 			stdevDensityCol = std::sqrt( sumDensityMeanDiff / Mat.getncol() );
+#ifdef PROFILE
+            infoPtr->EndTimer("FeatureCollection");
+            infoPtr->Print("FeatureCollection");
+#endif
 
 		}
 
@@ -738,8 +763,26 @@ public:
         infoPtr->Print("PPN");
 #endif
 
+        // Load model
+        // TODO: Remove hardcoded path
+        const char * modelPath = "../CombBLAS/include/CombBLAS/Autotuning/model/model_2d_xgb_globals.model";
+        XGB_CHECK(XGBoosterLoadModel(bstHandle, modelPath));
+
+        // Setup 
+
         return 0;
     }
+
+
+    template <typename AIT, typename ANT, typename ADER, typename BIT, typename BNT, typename BDER>
+    void MakeFeatureMatImpl(Inputs<AIT,ANT,ADER,BIT,BNT,BDER>& inputs, std::vector<SpGEMMParams>& searchSpace,
+                                float * featureMat) {
+        
+    }
+
+private:
+    BoosterHandle bstHandle;
+
 };
 
 #endif
