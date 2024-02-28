@@ -55,15 +55,19 @@ public:
 #ifdef PROFILE
         infoPtr->StartTimerGlobal("TuneSpGEMM2D");
 #endif
+
+        typedef SpGEMM2DModelXgb ModelDerType;
+
+        typedef SpGEMM2DModel<ModelDerType> ModelType;
         
-        SpGEMM2DInputs<AIT,ANT,ADER,BIT,BNT,BDER> inputs(A, B);
+        ModelDerType::Inputs<AIT,ANT,ADER,BIT,BNT,BDER> inputs(A, B);
         
         SpGEMMParams resultParams; 
         
         switch(method) {
             case BRUTE_FORCE:
             {
-                resultParams = SearchBruteForce<SpGEMMParams, SpGEMM2DModel<SpGEMM2DModelXgb>>(inputs); 
+                resultParams = SearchBruteForce<SpGEMMParams, ModelType>(inputs); 
                 break;
             }
             default:
