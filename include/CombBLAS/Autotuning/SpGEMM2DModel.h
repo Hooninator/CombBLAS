@@ -43,6 +43,11 @@ public:
         return static_cast<MT*>(this)->EstimateRuntimeImpl(inputs, params);
     }
 
+    std::vector<float> Predict(std::vector<float>& X) {
+        return static_cast<MT*>(this)->PredictImpl(X);
+    }
+
+    //TODO: This should be able to return vectors of things other than floats
     template <typename I>
     std::vector<float> MakeFeatureMat(I& inputs, std::vector<SpGEMMParams>& searchSpace) {
         return static_cast<MT*>(this)->MakeFeatureMatImpl(inputs,searchSpace);
@@ -425,8 +430,6 @@ public:
     template <typename AIT, typename ANT, typename ADER, typename BIT, typename BNT, typename BDER>
     double EstimateRuntimeImpl(Inputs<AIT,ANT,ADER, BIT, BNT, BDER>& inputs, SpGEMMParams& params) {
         
-        //Inputs<AIT,ANT,ADER,BIT,BNT,BDER> inputs = static_cast<Inputs<AIT,ANT,ADER,BIT,BNT,BDER>>(baseInputs);
-
 #ifdef DEBUG
         debugPtr->Log(params.OutStr());
         debugPtr->Print0(params.OutStr());
@@ -783,21 +786,24 @@ public:
         
     };
 
-    template <typename AIT, typename ANT, typename ADER, typename BIT, typename BNT, typename BDER>
-    double EstimateRuntimeImpl(Inputs<AIT,ANT,ADER,BIT,BNT,BDER>& inputs, SpGEMMParams& params) {
-#ifdef DEBUG
-        debugPtr->Log(params.OutStr());
-        debugPtr->Print0(params.OutStr());
-#endif
+    std::vector<float> PredictImpl(std::vector<float>& X) {
 
-#ifdef PROFILE
-        infoPtr->Put("Nodes", std::to_string(params.GetNodes()));
-        infoPtr->Put("PPN", std::to_string(params.GetPPN()));
-        infoPtr->Print("Nodes");
-        infoPtr->Print("PPN");
-#endif
+        // Create DMat
+        int nSamples = X.size() / nFeatures;
+        DMatrixHandle dMatHandle;
+        XGB_CHECK(XGDMatrixCreateFromMat(X.data(), nSamples, nFeatures, 0.0, &dMatHandle)); 
 
-        return 0;
+        // Make prediction
+		char const config[] =
+		  "{\"training\": false, \"type\": 0, "
+		  "\"iteration_begin\": 0, \"iteration_end\": 0, \"strict_shape\": false}";
+        bst_ulong outDim;
+        const bst_ulong * outShape; 
+        const float * prediction;
+        XGB_CHECK(XGBoosterPredictFromDMatrix(bstHandle, dMatHandle, config, &outShape, &outDim, &prediction));
+
+        return std::vector<float>(prediction, prediction+nSamples);
+
     }
 
 
@@ -844,8 +850,8 @@ public:
             std::for_each(featureOrder.begin(), featureOrder.end(),
                 [&featureMat, &Ainfo, &Binfo](auto& featureName) {
                     // Order is always feature-A, feature-B
-                    featureMat.push_back(Ainfo.featureMap[featureName]);
-                    featureMat.push_back(Binfo.featureMap[featureName]);
+                    featureMat.push_back(Ainfo.GetFeatureMap()[featureName]);
+                    featureMat.push_back(Binfo.GetFeatureMap()[featureName]);
                 }
             );
         }

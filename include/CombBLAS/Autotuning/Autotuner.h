@@ -13,11 +13,6 @@ namespace combblas {
 
 namespace autotuning {
 
-
-enum TuningMethod {
-    BRUTE_FORCE
-}typedef TuningMethod;
-
 class Autotuner {
 
 public:
@@ -38,12 +33,8 @@ public:
 
     
     /* TUNING */
-    
-
-    /* Main tuning routine for CPU 2DSpGEMM */
-    //TODO: Make the tuning method parameter a std::function instance
     template <typename AIT, typename ANT, typename ADER, typename BIT, typename BNT, typename BDER>
-    SpGEMMParams TuneSpGEMM2D(SpParMat<AIT, ANT, ADER>& A, SpParMat<BIT, BNT, BDER>& B, TuningMethod method,
+    SpGEMMParams TuneSpGEMM2DAnalytical(SpParMat<AIT, ANT, ADER>& A, SpParMat<BIT, BNT, BDER>& B, 
                                     std::string& matpathA, std::string& matpathB){
 
 #ifdef PROFILE
@@ -53,32 +44,54 @@ public:
 #endif
 
 #ifdef PROFILE
-        infoPtr->StartTimerGlobal("TuneSpGEMM2D");
+        infoPtr->StartTimerGlobal("TuneSpGEMM2DAnalytical");
 #endif
 
-        typedef SpGEMM2DModelXgb ModelDerType;
-
-        typedef SpGEMM2DModel<ModelDerType> ModelType;
+        typedef SpGEMM2DModel<SpGEMM2DModelAnalytical> ModelType;
         
-        ModelDerType::Inputs<AIT,ANT,ADER,BIT,BNT,BDER> inputs(A, B);
+        SpGEMM2DModelAnalytical::Inputs<AIT,ANT,ADER,BIT,BNT,BDER> inputs(A, B);
         
         SpGEMMParams resultParams; 
-        
-        switch(method) {
-            case BRUTE_FORCE:
-            {
-                resultParams = SearchBruteForce<SpGEMMParams, ModelType>(inputs); 
-                break;
-            }
-            default:
-            {
-                break;
-            }
-        }
+        resultParams = SearchBruteForce<SpGEMMParams, ModelType>(inputs);
 
 #ifdef PROFILE
-        infoPtr->EndTimerGlobal("TuneSpGEMM2D");
-        infoPtr->PrintGlobal("TuneSpGEMM2D");
+        infoPtr->EndTimerGlobal("TuneSpGEMM2DAnalytical");
+        infoPtr->PrintGlobal("TuneSpGEMM2DAnalytical");
+#endif
+
+#ifdef PROFILE
+        infoPtr->WriteInfoGlobal();
+        delete infoPtr;
+#endif
+
+        return resultParams;
+
+    }
+    
+    template <typename AIT, typename ANT, typename ADER, typename BIT, typename BNT, typename BDER>
+    SpGEMMParams TuneSpGEMM2DXgb(SpParMat<AIT, ANT, ADER>& A, SpParMat<BIT, BNT, BDER>& B, 
+                                    std::string& matpathA, std::string& matpathB){
+
+#ifdef PROFILE
+        std::string matnameA = ExtractMatName(matpathA);
+        std::string matnameB = ExtractMatName(matpathA);
+        infoPtr = new InfoLog("info-"+matnameA+"x"+matnameB+".out", autotuning::rank);
+#endif
+
+#ifdef PROFILE
+        infoPtr->StartTimerGlobal("TuneSpGEMM2DXgb");
+#endif
+
+        typedef SpGEMM2DModel<SpGEMM2DModelXgb> ModelType;
+        
+        SpGEMM2DModelXgb::Inputs<AIT,ANT,ADER,BIT,BNT,BDER> inputs(A, B);
+        
+        SpGEMMParams resultParams; 
+        resultParams = SearchInference<SpGEMMParams, ModelType>(inputs);
+
+#ifdef PROFILE
+        infoPtr->EndTimerGlobal("TuneSpGEMM2DXgb");
+        infoPtr->PrintGlobal("TuneSpGEMM2DXgb");
 #endif
 
 #ifdef PROFILE
@@ -144,18 +157,30 @@ public:
         infoPtr->StartTimerGlobal("InferenceSearch");
 #endif
 
-        auto searchSpace = P::ConstructSearchSpace2D(platformParams);
+        std::vector<P> searchSpace = P::ConstructSearchSpace2D(platformParams);
 
-        M model(PlatformParams);
+        M model(platformParams);
 
-        //NOTE: This is in row-major order
+        //NOTE: FeatureMat is in row-major order
         std::vector<float> featureMat;
         featureMat = model.MakeFeatureMat(inputs, searchSpace);
 
+        std::vector<float> predictions;
+        predictions = model.Predict(featureMat);
+
+        auto minElem = std::min_element(predictions.begin(), predictions.end());
+        int minIdx = std::distance(predictions.begin(), minElem);
+
+        P bestParams = searchSpace[minIdx];
+
 #ifdef PROFILE
+        infoPtr->PutGlobal("BestParams", bestParams.OutStr());
         infoPtr->EndTimerGlobal("InferenceSearch");
         infoPtr->PrintGlobal("InferenceSearch");
+        infoPtr->PrintGlobal("BestParams");
 #endif
+
+        return bestParams;
 
     }
 
