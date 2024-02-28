@@ -137,7 +137,6 @@ public:
     }
 
 
-#ifdef XGB_MODEL
     template <typename P, typename M, typename I>
     P SearchInference(I& inputs) {
         
@@ -149,8 +148,9 @@ public:
 
         M model(PlatformParams);
 
-        float * featureMat;
-        model.MakeFeatureMat(inputs, searchSpace, featureMat);
+        //NOTE: This is in row-major order
+        std::vector<float> featureMat;
+        featureMat = model.MakeFeatureMat(inputs, searchSpace);
 
 #ifdef PROFILE
         infoPtr->EndTimerGlobal("InferenceSearch");
@@ -158,7 +158,6 @@ public:
 #endif
 
     }
-#endif
 
     ~Autotuner(){}
 

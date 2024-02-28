@@ -44,8 +44,8 @@ public:
     }
 
     template <typename I>
-    void MakeFeatureMat(I& inputs, std::vector<SpGEMMParams>& searchSpace, float * featureMat) {
-        static_cast<MT*>(this)->MakeFeatureMatImpl(inputs,searchSpace,featureMat);
+    std::vector<float> MakeFeatureMat(I& inputs, std::vector<SpGEMMParams>& searchSpace) {
+        return static_cast<MT*>(this)->MakeFeatureMatImpl(inputs,searchSpace);
     }
 
 
@@ -627,7 +627,14 @@ public:
     SpGEMM2DModelXgb(PlatformParams& platformParams) :
         SpGEMM2DModel<SpGEMM2DModelXgb>(platformParams) 
     {
+
         XGB_CHECK(XGBoosterCreate(nullptr, 0, &bstHandle));
+
+        //TODO: Get rid of hardcoded filepath
+        const char * modelPath = "../CombBLAS/include/CombBLAS/Autotuning/model/model_2d_xgb_globals.model";
+        XGB_CHECK(XGBoosterLoadModel(bstHandle, modelPath));
+        
+        XGB_CHECK(XGBoosterGetNumFeature(bstHandle, (bst_ulong*)(&nFeatures)));
     }
 
     
@@ -643,6 +650,12 @@ public:
         SpParMatInfoXgb(SpParMat<IT,NT,DER>& Mat):
             SpParMatInfo<IT,NT,DER>(Mat)
         {
+            
+            featureMap.emplace("nnz", nnz);
+            featureMap.emplace("m", nrows);
+            featureMap.emplace("n", ncols);
+            featureMap.emplace("density", globDensity);
+
             SetGlobalColInfo(Mat);    
         }
 
@@ -656,8 +669,13 @@ public:
 			// avg nnz per column
 			avgNnzCol = static_cast<float>(Mat.getnnz()) / static_cast<float>(Mat.getncol());
 
+            featureMap.emplace("avgNnzCol", avgNnzCol);
+
 			// avg density per column
-			avgDensityCol = (static_cast<float>(Mat.getnnz()) / static_cast<float>(Mat.getnrow())) / static_cast<float>(Mat.getncol());
+			avgDensityCol = (static_cast<float>(Mat.getnnz()) / static_cast<float>(Mat.getnrow())) / 
+                                    static_cast<float>(Mat.getncol());
+
+            featureMap.emplace("avgDensityCol", avgDensityCol);
 
 			// Reduce to get complete nnz per column
 			std::vector<IT> nnzColVec(Mat.seqptr()->getncol());
@@ -692,11 +710,15 @@ public:
 
 			// Global reduce to compute final min, max, and sum
 			// TODO: use nonblocking collectives?
-			MPI_Allreduce(MPI_IN_PLACE, (void*)(&minNnzCol), 1, MPIType<IT>(), MPI_MIN, Mat.getcommgrid()->GetRowWorld());
-			MPI_Allreduce(MPI_IN_PLACE, (void*)(&maxNnzCol), 1, MPIType<IT>(), MPI_MAX, Mat.getcommgrid()->GetRowWorld());
+			MPI_Allreduce(MPI_IN_PLACE, (void*)(&minNnzCol), 1, MPIType<IT>(), MPI_MIN, 
+                            Mat.getcommgrid()->GetRowWorld());
+			MPI_Allreduce(MPI_IN_PLACE, (void*)(&maxNnzCol), 1, MPIType<IT>(), MPI_MAX, 
+                            Mat.getcommgrid()->GetRowWorld());
 
-			MPI_Allreduce(MPI_IN_PLACE, (void*)(&minDensityCol), 1, MPI_FLOAT, MPI_MIN, Mat.getcommgrid()->GetRowWorld());
-			MPI_Allreduce(MPI_IN_PLACE, (void*)(&maxDensityCol), 1, MPI_FLOAT, MPI_MAX, Mat.getcommgrid()->GetRowWorld());
+			MPI_Allreduce(MPI_IN_PLACE, (void*)(&minDensityCol), 1, MPI_FLOAT, MPI_MIN, 
+                            Mat.getcommgrid()->GetRowWorld());
+			MPI_Allreduce(MPI_IN_PLACE, (void*)(&maxDensityCol), 1, MPI_FLOAT, MPI_MAX, 
+                            Mat.getcommgrid()->GetRowWorld());
 
 			// pack floats that will be summed into single buffer
 			float locBuf[] = {sumNnzMeanDiff, sumDensityMeanDiff};
@@ -705,6 +727,14 @@ public:
 			// finish stdev calculations
 			stdevNnzCol = std::sqrt( sumNnzMeanDiff / Mat.getncol() );
 			stdevDensityCol = std::sqrt( sumDensityMeanDiff / Mat.getncol() );
+            
+            featureMap.emplace("minNnzCol", minNnzCol);
+            featureMap.emplace("maxNnzCol", maxNnzCol);
+            featureMap.emplace("minDensityCol", minDensityCol);
+            featureMap.emplace("maxDensityCol", maxDensityCol);
+            featureMap.emplace("stdevNnzCol", stdevNnzCol);
+            featureMap.emplace("stdevDensityCol", stdevDensityCol);
+
 #ifdef PROFILE
             infoPtr->EndTimer("FeatureCollection");
             infoPtr->Print("FeatureCollection");
@@ -713,15 +743,17 @@ public:
 		}
 
 
-		inline IT GetAvgNnzCol() const {return avgNnzCol;}
+		inline float GetAvgNnzCol() const {return avgNnzCol;}
 		inline IT GetMinNnzCol() const {return minNnzCol;}
 		inline IT GetMaxNnzCol() const {return maxNnzCol;}
-		inline IT GetStdevNnzCol() const {return stdevNnzCol;}
+		inline float GetStdevNnzCol() const {return stdevNnzCol;}
 
-		inline IT GetAvgDensityCol() const {return avgDensityCol;}
-		inline IT GetMinDensityCol() const {return minDensityCol;}
-		inline IT GetMaxDensityCol() const {return maxDensityCol;}
-		inline IT GetStdevDensityCol() const {return stdevDensityCol;}
+		inline float GetAvgDensityCol() const {return avgDensityCol;}
+		inline float GetMinDensityCol() const {return minDensityCol;}
+		inline float GetMaxDensityCol() const {return maxDensityCol;}
+		inline float GetStdevDensityCol() const {return stdevDensityCol;}
+
+        inline std::map<std::string, float> GetFeatureMap() const {return featureMap;} 
 
     private:
 
@@ -733,6 +765,8 @@ public:
 		float minDensityCol;
 		float maxDensityCol;
 		float stdevDensityCol;
+
+        std::map<std::string, float> featureMap;
 
     };
 
@@ -763,24 +797,65 @@ public:
         infoPtr->Print("PPN");
 #endif
 
-        // Load model
-        // TODO: Remove hardcoded path
-        const char * modelPath = "../CombBLAS/include/CombBLAS/Autotuning/model/model_2d_xgb_globals.model";
-        XGB_CHECK(XGBoosterLoadModel(bstHandle, modelPath));
-
-        // Setup 
-
         return 0;
     }
 
 
     template <typename AIT, typename ANT, typename ADER, typename BIT, typename BNT, typename BDER>
-    void MakeFeatureMatImpl(Inputs<AIT,ANT,ADER,BIT,BNT,BDER>& inputs, std::vector<SpGEMMParams>& searchSpace,
-                                float * featureMat) {
+    std::vector<float> MakeFeatureMatImpl(Inputs<AIT,ANT,ADER,BIT,BNT,BDER>& inputs, 
+                                            std::vector<SpGEMMParams>& searchSpace) {
+
+        auto Ainfo = inputs.Ainfo;
+        auto Binfo = inputs.Binfo;
         
+        int nSamples = searchSpace.size();
+
+        // Feature order
+        std::vector<std::string> featureOrder{
+            "avgDensityCol",
+            "avgNnzCol",
+            "density",
+            "m",
+            "maxDensityCol",
+            "maxNnzCol",
+            "minDensityCol",
+            "minNnzCol",
+            "n",
+            "nnz",
+            "stdevDensityCol",
+            "stdevNnzCol"
+        };
+
+        // Each row is a sample
+        std::vector<float> featureMat;
+        featureMat.reserve(nSamples*nFeatures);
+
+        //TODO: There has to be a better way to do this
+        // Populate the feature matrix
+        for (int i=0; i<nSamples; i++) {
+
+            // Nodes and PPN always go first
+            auto currParams = searchSpace[i];
+            featureMat.push_back(currParams.GetNodes());
+            featureMat.push_back(currParams.GetPPN());
+            
+            // Iterate through features in this sample according to feature order defined earlier
+            // and push them onto the matrix
+            std::for_each(featureOrder.begin(), featureOrder.end(),
+                [&featureMat, &Ainfo, &Binfo](auto& featureName) {
+                    // Order is always feature-A, feature-B
+                    featureMat.push_back(Ainfo.featureMap[featureName]);
+                    featureMat.push_back(Binfo.featureMap[featureName]);
+                }
+            );
+        }
+
+
+        return featureMat; 
     }
 
 private:
+    int nFeatures;
     BoosterHandle bstHandle;
 
 };
