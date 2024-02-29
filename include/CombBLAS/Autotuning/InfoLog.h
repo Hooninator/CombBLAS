@@ -95,6 +95,8 @@ public:
     void Clear() {infoMap.clear();}
     void ClearGlobal() {infoMapGlobal.clear();}
 
+    std::ofstream& OFS(){return ofs;}//TODO: This is horrible
+
 
     ~InfoLog() {ofs.close();}
 

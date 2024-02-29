@@ -163,10 +163,6 @@ public:
         // Search up to 32 nodes, which is fine since we do not collect distribution specific-info
         std::vector<P> searchSpace = P::ConstructSearchSpace2D(platformParams, 32);
 
-#ifdef DEBUG
-        debugPtr->LogVecSameLine(searchSpace, "Search space: ");
-#endif
-
 #ifdef PROFILE
         infoPtr->StartTimer("FeatureMat");
 #endif
@@ -187,13 +183,10 @@ public:
         std::vector<float> predictions;
         predictions = model.Predict(featureMat);
 
-#ifdef DEBUG
-        debugPtr->LogVecSameLine(predictions, "Predicted times: ");
-#endif
-
 #ifdef PROFILE
         infoPtr->EndTimer("Prediction");
         infoPtr->Print("Prediction");
+        model.WritePrediction(searchSpace, predictions);
 #endif
 
         auto minElem = std::min_element(predictions.begin(), predictions.end());

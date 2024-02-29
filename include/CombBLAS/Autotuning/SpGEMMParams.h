@@ -175,7 +175,7 @@ private:
 };
 
 std::ostream& operator<<(std::ostream& os, SpGEMMParams& params) {
-    os<<params.OutStr()<<std::endl;
+    os<<params.OutStr();
     return os;
 };
 

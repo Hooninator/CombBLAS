@@ -56,7 +56,9 @@ public:
         return static_cast<MT*>(this)->MakeFeatureMatImpl(inputs,searchSpace);
     }
 
-
+    void WritePrediction(std::vector<SpGEMMParams>& searchSpace, std::vector<float>& predictions) {
+        static_cast<MT*>(this)->WritePredictionImpl(searchSpace, predictions);
+    }
 
 protected:
 
@@ -864,6 +866,18 @@ public:
 
         return featureMat; 
     }
+
+//TODO: replace this with somethine non-embarrassing 
+#ifdef PROFILE
+    void WritePredictionImpl(std::vector<SpGEMMParams>& searchSpace, std::vector<float> prediction) {
+        infoPtr->OFS()<<"----RUNTIME ESTIMATES----"<<std::endl;
+        ASSERT(searchSpace.size()==prediction.size(), "sizes not equal");
+        for (int i=0; i<searchSpace.size(); i++) {
+            infoPtr->OFS()<<searchSpace[i]<<":"<<prediction[i]<<"s ";
+        }
+        infoPtr->OFS()<<std::endl;
+    }
+#endif
 
 private:
     int nFeatures;
