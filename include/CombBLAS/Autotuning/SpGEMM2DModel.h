@@ -42,8 +42,8 @@ public:
 
     /* Get runtime estimate of a certain combo of parameters */
     template <typename I>
-    double EstimateRuntime(I& inputs, SpGEMMParams& params) { 
-        return static_cast<MT*>(this)->EstimateRuntimeImpl(inputs, params);
+    std::vector<float> Predict(I& inputs, std::vector<SpGEMMParams>& params) { 
+        return static_cast<MT*>(this)->PredictImpl(inputs, params);
     }
 
     std::vector<float> Predict(std::vector<float>& X) {
@@ -56,9 +56,17 @@ public:
         return static_cast<MT*>(this)->MakeFeatureMatImpl(inputs,searchSpace);
     }
 
+    //TODO: replace this with somethine non-embarrassing 
+#ifdef PROFILE
     void WritePrediction(std::vector<SpGEMMParams>& searchSpace, std::vector<float>& predictions) {
-        static_cast<MT*>(this)->WritePredictionImpl(searchSpace, predictions);
+        infoPtr->OFS()<<"----RUNTIME ESTIMATES----"<<std::endl;
+        ASSERT(searchSpace.size()==predictions.size(), "sizes not equal");
+        for (int i=0; i<searchSpace.size(); i++) {
+            infoPtr->OFS()<<searchSpace[i]<<":"<<predictions[i]<<"s ";
+        }
+        infoPtr->OFS()<<std::endl;
     }
+#endif
 
 protected:
 
@@ -80,7 +88,6 @@ public:
         //TODO: For col split, no need to store row idx, and for row split, no need to store col idx
         typedef std::vector<std::tuple<IT,IT,IT>> NnzTuples;
 
-        //enum SPLIT {COL_SPLIT, ROW_SPLIT};
         using SpParMatInfo<IT,NT,DER>::SpParMatInfo; 
         using SpParMatInfo<IT,NT,DER>::locNnz; 
         using SpParMatInfo<IT,NT,DER>::locNcolsExact; 
@@ -434,54 +441,69 @@ public:
 
     /* Get runtime estimate of a certain combo of parameters */
     template <typename AIT, typename ANT, typename ADER, typename BIT, typename BNT, typename BDER>
-    double EstimateRuntimeImpl(Inputs<AIT,ANT,ADER, BIT, BNT, BDER>& inputs, SpGEMMParams& params) {
+    std::vector<float> PredictImpl(Inputs<AIT,ANT,ADER, BIT, BNT, BDER>& inputs, std::vector<SpGEMMParams>& searchSpace) {
         
+        std::vector<float> predictions;
+        predictions.reserve(searchSpace.size());
+        for (auto params : searchSpace) {
 #ifdef DEBUG
-        debugPtr->Log(params.OutStr());
-        debugPtr->Print0(params.OutStr());
+            debugPtr->Log(params.OutStr());
+            debugPtr->Print0(params.OutStr());
 #endif
 
 #ifdef PROFILE
-        infoPtr->Put("Nodes", std::to_string(params.GetNodes()));
-        infoPtr->Put("PPN", std::to_string(params.GetPPN()));
-        infoPtr->Print("Nodes");
-        infoPtr->Print("PPN");
+            infoPtr->Put("Nodes", std::to_string(params.GetNodes()));
+            infoPtr->Put("PPN", std::to_string(params.GetPPN()));
+            infoPtr->Print("Nodes");
+            infoPtr->Print("PPN");
 #endif
 
-        auto Ainfo = inputs.Ainfo;
-        auto Binfo = inputs.Binfo;
+            auto Ainfo = inputs.Ainfo;
+            auto Binfo = inputs.Binfo;
 
-        // Set dimensions of 3D processor grid
-        Ainfo.SetGridDims(params);
-        Binfo.SetGridDims(params);
+            // Set dimensions of 3D processor grid
+            Ainfo.SetGridDims(params);
+            Binfo.SetGridDims(params);
 
-        // Compute nnz per tile in hypothetical 3D grid
-        Ainfo.ComputeNnzArr(params);
-        Binfo.ComputeNnzArr(params);
+            // Compute nnz per tile in hypothetical 3D grid
+            Ainfo.ComputeNnzArr(params);
+            Binfo.ComputeNnzArr(params);
 
-        //BROADCAST
-        CommModel<AIT> *bcastModel = new PostCommModel<AIT>(platformParams.GetInternodeAlpha(),
-                                                    platformParams.GetInternodeBeta(),
-                                                     platformParams.GetIntranodeBeta());
-        double bcastATime = BcastTime(bcastModel, Ainfo, params, true);
-        double bcastBTime = BcastTime(bcastModel, Binfo, params, false);
-        
-        //LOCAL SpGEMM
-        LocalSpGEMMModel<AIT, BIT>* localMultModel = new RooflineLocalSpGEMMModel<AIT, ANT, BIT, BNT>(autotuning::perlmutterParams);
-        double localMultTime = LocalMultTime(localMultModel, Ainfo, Binfo, params);
+            //BROADCAST
+            CommModel<AIT> *bcastModel = new PostCommModel<AIT>(platformParams.GetInternodeAlpha(),
+                                                        platformParams.GetInternodeBeta(),
+                                                         platformParams.GetIntranodeBeta());
+            float bcastATime = BcastTime(bcastModel, Ainfo, params, true);
+            float bcastBTime = BcastTime(bcastModel, Binfo, params, false);
+            
+            //LOCAL SpGEMM
+            LocalSpGEMMModel<AIT, BIT>* localMultModel = new RooflineLocalSpGEMMModel<AIT, ANT, BIT, BNT>(autotuning::perlmutterParams);
+            float localMultTime = LocalMultTime(localMultModel, Ainfo, Binfo, params);
 
 #ifdef PROFILE
-        infoPtr->Put("bcastTime-A", std::to_string(bcastATime/1e6));
-        infoPtr->Put("bcastTime-B", std::to_string(bcastBTime/1e6));
-        infoPtr->Put("multTime", std::to_string(localMultTime/1e6));
+            infoPtr->Put("bcastTime-A", std::to_string(bcastATime/1e6));
+            infoPtr->Put("bcastTime-B", std::to_string(bcastBTime/1e6));
+            infoPtr->Put("multTime", std::to_string(localMultTime/1e6));
 #endif
 
-        delete bcastModel;
-        delete localMultModel;
+            delete bcastModel;
+            delete localMultModel;
 
-        MPI_Barrier(MPI_COMM_WORLD);
+            MPI_Barrier(MPI_COMM_WORLD);
 
-        return bcastATime + bcastBTime + localMultTime;
+            float time =  bcastATime + bcastBTime + localMultTime;
+
+#ifdef PROFILE
+            infoPtr->Put("TotalTime", std::to_string(time));
+            infoPtr->WriteInfo();
+            infoPtr->Clear();
+#endif
+
+            predictions.push_back(time);
+        }
+
+        return predictions;
+
     }
 
 
@@ -489,7 +511,7 @@ public:
 
     //TODO: Consider nnz estimator class + template to make switching between things here easier
     template <typename IT, typename NT, typename DER>
-    double BcastTime(CommModel<IT> * bcastModel, SpParMatInfoAnalytical<IT,NT,DER>& Minfo, SpGEMMParams& params, bool row) {
+    float BcastTime(CommModel<IT> * bcastModel, SpParMatInfoAnalytical<IT,NT,DER>& Minfo, SpGEMMParams& params, bool row) {
 
 #ifdef PROFILE
         if (row)
@@ -501,7 +523,7 @@ public:
         std::vector<IT> * nnz2D = Minfo.GetNnzArr();
 
         // Compute local bcast times
-        std::vector<double> locBcastTimes(params.GetTotalProcs());
+        std::vector<float> locBcastTimes(params.GetTotalProcs());
         for (int p=0; p<params.GetTotalProcs(); p++) {
             
             // Vector containing nnz for each rank participating in broadcasts with rank p
@@ -513,8 +535,8 @@ public:
                 nnzBcastWorld = Minfo.SliceNnzCol(nnz2D, p, params.GetGridDim());
             
             // Compute and sum all times for all bcasts rank p participates in 
-            double locBcastTime = std::reduce(nnzBcastWorld.begin(), nnzBcastWorld.end(), 0, 
-                [&Minfo, &bcastModel, &params](double sum, IT nnz) {
+            float locBcastTime = std::reduce(nnzBcastWorld.begin(), nnzBcastWorld.end(), 0, 
+                [&Minfo, &bcastModel, &params](float sum, IT nnz) {
                     IT msgSize = Minfo.ComputeMsgSize(nnz);
 
                     CommOpts * opts = new CommOpts{
@@ -524,7 +546,7 @@ public:
 
                     CommInfo<IT> * info = MakeBcastCommInfo(params.GetGridDim(),  msgSize); 
 
-                    double singleBcastTime = bcastModel->Time(info, opts);
+                    float singleBcastTime = bcastModel->Time(info, opts);
 
                     delete info;
                     delete opts;
@@ -538,8 +560,8 @@ public:
         }
 
         // Reduce to get max time
-        double finalTime = std::reduce(locBcastTimes.begin(), locBcastTimes.end(), 0,
-            [](double currMax, double currElem) {
+        float finalTime = std::reduce(locBcastTimes.begin(), locBcastTimes.end(), 0,
+            [](float currMax, float currElem) {
                 return std::max(currMax, currElem);
             }
         );
@@ -561,7 +583,7 @@ public:
     /* LOCAL SpGEMM */
     
     template <typename AIT, typename ANT, typename ADER, typename BIT, typename BNT, typename BDER>
-    double LocalMultTime(LocalSpGEMMModel<AIT, BIT>* model, 
+    float LocalMultTime(LocalSpGEMMModel<AIT, BIT>* model, 
                             SpParMatInfoAnalytical<AIT,ANT,ADER>& Ainfo,
                             SpParMatInfoAnalytical<BIT,BNT,BDER>& Binfo,
                             SpGEMMParams& params) {
@@ -574,7 +596,7 @@ public:
 
         const int totalProcs = params.GetTotalProcs();
 
-        std::vector<double> * localSpGEMMTimes = new std::vector<double>;
+        std::vector<float> * localSpGEMMTimes = new std::vector<float>;
         localSpGEMMTimes->reserve(totalProcs);
         for (int p=0; p<totalProcs; p++) {
 
@@ -605,8 +627,8 @@ public:
 
 
         // Reduce to get max time
-        double finalTime = std::reduce(localSpGEMMTimes->begin(),localSpGEMMTimes->end(), 0,
-            [](double currMax, double currElem) {
+        float finalTime = std::reduce(localSpGEMMTimes->begin(),localSpGEMMTimes->end(), 0,
+            [](float currMax, float currElem) {
                 return std::max(currMax, currElem);
             }
         );
@@ -621,7 +643,7 @@ public:
         return finalTime;
     }
 
-    double LayerMergeTime() {
+    float LayerMergeTime() {
         return 0;
     }
  
@@ -867,17 +889,6 @@ public:
         return featureMat; 
     }
 
-//TODO: replace this with somethine non-embarrassing 
-#ifdef PROFILE
-    void WritePredictionImpl(std::vector<SpGEMMParams>& searchSpace, std::vector<float> prediction) {
-        infoPtr->OFS()<<"----RUNTIME ESTIMATES----"<<std::endl;
-        ASSERT(searchSpace.size()==prediction.size(), "sizes not equal");
-        for (int i=0; i<searchSpace.size(); i++) {
-            infoPtr->OFS()<<searchSpace[i]<<":"<<prediction[i]<<"s ";
-        }
-        infoPtr->OFS()<<std::endl;
-    }
-#endif
 
 private:
     int nFeatures;

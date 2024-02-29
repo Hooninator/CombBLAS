@@ -117,7 +117,7 @@ public:
 #endif
 
         //TODO: This makes this routine not generic since not all problems will have a 'searchspace2d' function
-        auto searchSpace = P::ConstructSearchSpace2D(platformParams, jobPtr->nodes);
+        auto searchSpace = P::ConstructSearchSpace2D(platformParams, jobPtr->nodes, jobPtr->tasksPerNode);
         ASSERT(searchSpace.size()>0, "Search space is of size 0!");
 
 #ifdef PROFILE
@@ -126,27 +126,20 @@ public:
 
         P bestParams;  
 
-        double bestTime = std::numeric_limits<double>::max(); 
+        std::vector<float> predictions = model.Predict(inputs, searchSpace);
 
-        for (P currParams : searchSpace) {
-
-            double currTime = model.EstimateRuntime(inputs, currParams);
-            if (currTime<=bestTime) {
-                bestTime = currTime;
-                bestParams = currParams;
-            }
+        bestParams = searchSpace[std::distance(predictions.begin(), std::min_element(predictions.begin(), predictions.end()))];
 
 #ifdef PROFILE
-            infoPtr->Put("TotalTime", std::to_string(currTime/1e6));
-            infoPtr->WriteInfo();
-            infoPtr->Clear();
-#endif
 
-        }
+        model.WritePrediction(predictions);
 
-#ifdef PROFILE
+        infoPtr->PutGlobal("BestParams", bestParams.OutStr());
+        infoPtr->PutGlobal("BestTime", std::to_string(ReduceMin(predictions)));
         infoPtr->EndTimerGlobal("BruteForceSearch");
         infoPtr->PrintGlobal("BruteForceSearch");
+        infoPtr->PrintGlobal("BestParams");
+        infoPtr->PrintGlobal("BestTime");
 #endif
         
         return bestParams;
@@ -161,7 +154,8 @@ public:
 #endif
 
         // Search up to 32 nodes, which is fine since we do not collect distribution specific-info
-        std::vector<P> searchSpace = P::ConstructSearchSpace2D(platformParams, 32);
+        std::vector<P> searchSpace = P::ConstructSearchSpace2D(platformParams, 32, 128);
+        ASSERT(searchSpace.size()>0, "Search space is of size 0!");
 
 #ifdef PROFILE
         infoPtr->StartTimer("FeatureMat");
@@ -186,7 +180,9 @@ public:
 #ifdef PROFILE
         infoPtr->EndTimer("Prediction");
         infoPtr->Print("Prediction");
+
         model.WritePrediction(searchSpace, predictions);
+
 #endif
 
         auto minElem = std::min_element(predictions.begin(), predictions.end());
