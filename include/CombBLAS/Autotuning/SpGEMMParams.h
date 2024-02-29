@@ -40,7 +40,7 @@ public:
 
     std::string OutStr() {
         std::stringstream ss;
-        ss<< "(Nodes: "<<nodes<<", PPN: "<<ppn<<", Layers: "<<layers<<")";
+        ss<<nodes<<","<<ppn<<","<<layers;
         return ss.str();
     }
 
