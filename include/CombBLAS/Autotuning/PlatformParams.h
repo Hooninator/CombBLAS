@@ -19,6 +19,8 @@ public:
     
     //TODO: Provide utilities for measuring members     
 
+    PlatformParams(){}
+
     //alpha is us
     //beta is bytes/us
     //all memory things are bytes/us

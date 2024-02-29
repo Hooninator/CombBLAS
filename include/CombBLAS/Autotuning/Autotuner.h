@@ -48,11 +48,13 @@ public:
 #endif
 
         typedef SpGEMM2DModel<SpGEMM2DModelAnalytical> ModelType;
+        ModelType model;
+        model.Create(platformParams);
         
         SpGEMM2DModelAnalytical::Inputs<AIT,ANT,ADER,BIT,BNT,BDER> inputs(A, B);
         
         SpGEMMParams resultParams; 
-        resultParams = SearchBruteForce<SpGEMMParams, ModelType>(inputs);
+        resultParams = SearchBruteForce<SpGEMMParams, ModelType>(inputs, model);
 
 #ifdef PROFILE
         infoPtr->EndTimerGlobal("TuneSpGEMM2DAnalytical");
@@ -83,11 +85,13 @@ public:
 #endif
 
         typedef SpGEMM2DModel<SpGEMM2DModelXgb> ModelType;
+        ModelType model;
+        model.Create(platformParams);
         
         SpGEMM2DModelXgb::Inputs<AIT,ANT,ADER,BIT,BNT,BDER> inputs(A, B);
         
         SpGEMMParams resultParams; 
-        resultParams = SearchInference<SpGEMMParams, ModelType>(inputs);
+        resultParams = SearchInference<SpGEMMParams>(inputs, model);
 
 #ifdef PROFILE
         infoPtr->EndTimerGlobal("TuneSpGEMM2DXgb");
@@ -106,7 +110,7 @@ public:
 
     
     template <typename P, typename M, typename I>
-    P SearchBruteForce(I& inputs) {
+    P SearchBruteForce(I& inputs, M& model) {
 
 #ifdef PROFILE
         infoPtr->StartTimerGlobal("BruteForceSearch");
@@ -121,7 +125,6 @@ public:
 #endif
 
         P bestParams;  
-        M model(platformParams);
 
         double bestTime = std::numeric_limits<double>::max(); 
 
@@ -151,7 +154,7 @@ public:
 
 
     template <typename P, typename M, typename I>
-    P SearchInference(I& inputs) {
+    P SearchInference(I& inputs, M& model) {
         
 #ifdef PROFILE
         infoPtr->StartTimerGlobal("InferenceSearch");
@@ -159,14 +162,30 @@ public:
 
         std::vector<P> searchSpace = P::ConstructSearchSpace2D(platformParams);
 
-        M model(platformParams);
+#ifdef PROFILE
+        infoPtr->StartTimer("FeatureMat");
+#endif
 
         //NOTE: FeatureMat is in row-major order
         std::vector<float> featureMat;
         featureMat = model.MakeFeatureMat(inputs, searchSpace);
 
+#ifdef PROFILE
+        infoPtr->EndTimer("FeatureMat");
+        infoPtr->Print("FeatureMat");
+#endif
+
+#ifdef PROFILE
+        infoPtr->StartTimer("Prediction");
+#endif
+        
         std::vector<float> predictions;
         predictions = model.Predict(featureMat);
+
+#ifdef PROFILE
+        infoPtr->EndTimer("Prediction");
+        infoPtr->Print("Prediction");
+#endif
 
         auto minElem = std::min_element(predictions.begin(), predictions.end());
         int minIdx = std::distance(predictions.begin(), minElem);
