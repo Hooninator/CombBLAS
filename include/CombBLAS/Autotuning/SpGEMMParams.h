@@ -12,6 +12,7 @@ namespace combblas{
 
 namespace autotuning{
 
+
 class SpGEMMParams {
     
 public:
@@ -28,6 +29,8 @@ public:
         gridSize = totalProcs / layers;
         gridDim = RoundedSqrt<int,int>(gridSize);
     }
+
+
 
 
     void Print() {
@@ -60,9 +63,9 @@ public:
     }
 
 
-    static std::vector<SpGEMMParams> ConstructSearchSpace2D(PlatformParams& params) {
+    static std::vector<SpGEMMParams> ConstructSearchSpace2D(PlatformParams& params, int nodeLimit) {
         std::vector<SpGEMMParams> result;
-        for (int _nodes = 1; _nodes<=jobPtr->nodes; _nodes*=2) {
+        for (int _nodes = 1; _nodes<=nodeLimit; _nodes*=2) {
             for (int _ppn=1; _ppn<=jobPtr->tasksPerNode; _ppn*=2) {
                 if (IsPerfectSquare(_ppn*_nodes)) {
                     result.push_back(SpGEMMParams(_nodes,_ppn,1));
@@ -171,6 +174,10 @@ private:
 
 };
 
+std::ostream& operator<<(std::ostream& os, SpGEMMParams& params) {
+    os<<params.OutStr()<<std::endl;
+    return os;
+};
 
 }//autotuning
 }//combblas

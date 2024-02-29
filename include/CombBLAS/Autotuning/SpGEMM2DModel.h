@@ -636,7 +636,7 @@ public:
         XGB_CHECK(XGBoosterCreate(nullptr, 0, &bstHandle));
 
         //TODO: Get rid of hardcoded filepath
-        const char * modelPath = "../CombBLAS/include/CombBLAS/Autotuning/model/model_2d_xgb_globals.model";
+        const char * modelPath = "../include/CombBLAS/Autotuning/model/model_2d_xgb_globals.model";
         XGB_CHECK(XGBoosterLoadModel(bstHandle, modelPath));
         
         XGB_CHECK(XGBoosterGetNumFeature(bstHandle, (bst_ulong*)(&nFeatures)));
