@@ -117,7 +117,7 @@ public:
 #endif
 
         //TODO: This makes this routine not generic since not all problems will have a 'searchspace2d' function
-        auto searchSpace = P::ConstructSearchSpace2D(platformParams);
+        auto searchSpace = P::ConstructSearchSpace2D(platformParams, jobPtr->nodes);
         ASSERT(searchSpace.size()>0, "Search space is of size 0!");
 
 #ifdef PROFILE
@@ -160,7 +160,12 @@ public:
         infoPtr->StartTimerGlobal("InferenceSearch");
 #endif
 
-        std::vector<P> searchSpace = P::ConstructSearchSpace2D(platformParams);
+        // Search up to 32 nodes, which is fine since we do not collect distribution specific-info
+        std::vector<P> searchSpace = P::ConstructSearchSpace2D(platformParams, 32);
+
+#ifdef DEBUG
+        debugPtr->LogVecSameLine(searchSpace, "Search space: ");
+#endif
 
 #ifdef PROFILE
         infoPtr->StartTimer("FeatureMat");
@@ -182,6 +187,10 @@ public:
         std::vector<float> predictions;
         predictions = model.Predict(featureMat);
 
+#ifdef DEBUG
+        debugPtr->LogVecSameLine(predictions, "Predicted times: ");
+#endif
+
 #ifdef PROFILE
         infoPtr->EndTimer("Prediction");
         infoPtr->Print("Prediction");
@@ -194,9 +203,11 @@ public:
 
 #ifdef PROFILE
         infoPtr->PutGlobal("BestParams", bestParams.OutStr());
+        infoPtr->PutGlobal("BestTime", std::to_string(predictions[minIdx]));
         infoPtr->EndTimerGlobal("InferenceSearch");
         infoPtr->PrintGlobal("InferenceSearch");
         infoPtr->PrintGlobal("BestParams");
+        infoPtr->PrintGlobal("BestTime");
 #endif
 
         return bestParams;
