@@ -76,28 +76,28 @@ public:
 // stages 1 & 2 may lead to memory leaks, be aware on memory limited systems
 int main(int argc, char *argv[])
 {
-#ifdef GPU_ENABLED
-// SpParHelper::Print("GPU ENABLED\n");
-#endif
 	int nprocs, myrank;
 	MPI_Init(&argc, &argv);
 	MPI_Comm_size(MPI_COMM_WORLD, &nprocs);
 	MPI_Comm_rank(MPI_COMM_WORLD, &myrank);
+#ifdef GPU_ENABLED
+    SpParHelper::Print("GPU ENABLED\n");
+#endif
 
-	if (argc < 4)
+	if (argc < 3)
 	{
 		if (myrank == 0)
 		{
-			cout << "Usage: ./MultTest <MatrixA> <MatrixB> <MatrixC>" << endl;
-			cout << "<MatrixA>,<MatrixB>,<MatrixC> are absolute addresses, and files should be in triples format" << endl;
+			cout << "Usage: ./MultTest <MatrixA> <MatrixC>" << endl;
+			cout << "<MatrixA>,<MatrixC> are absolute addresses, and files should be in triples format" << endl;
 		}
 		MPI_Finalize();
 		return -1;
 	}
 	{
 		string Aname(argv[1]);
-		string Bname(argv[2]);
-		string Cname(argv[3]);
+		string Bname(Aname);
+		string Cname(argv[2]);
 
 		MPI_Barrier(MPI_COMM_WORLD);
 		typedef PlusTimesSRing<double, double> PTDOUBLEDOUBLE;
@@ -113,18 +113,22 @@ int main(int argc, char *argv[])
 		PSpMat<double>::MPI_DCCols CControl(fullWorld);
 
 		A.ParallelReadMM(Aname, true, maximum<double>());
-#ifndef NOGEMM
 		B.ParallelReadMM(Bname, true, maximum<double>());
-
 		CControl.ParallelReadMM(Cname, true, maximum<double>());
-#endif
 		A.PrintInfo();
 
-#ifndef NOGEMM
+        SpParHelper::Print("Done reading, starting multiply...\n");
+
 		double t3 = MPI_Wtime();
 		C = Mult_AnXBn_DoubleBuff_CUDA<PTDOUBLEDOUBLE, double, PSpMat<double>::DCCols>(A, B);
 		double t4 = MPI_Wtime();
-		std::cout << "Time taken: " << t4 - t3 << std::endl;
+		std::cout << "Time taken for GPU: " << t4 - t3 << std::endl;
+
+        t3 = MPI_Wtime();
+        C = Mult_AnXBn_DoubleBuff<PTDOUBLEDOUBLE, double, PSpMat<double>::DCCols>(A,B);
+        t4 = MPI_Wtime();
+        std::cout<<"Time taken for CPU: "<<t4-t3<<std::endl;
+
 		C.PrintInfo();
 		if (CControl == C)
 		{
@@ -134,6 +138,9 @@ int main(int argc, char *argv[])
 		{
 			SpParHelper::Print("ERROR in double CUDA  buffered multiplication, go fix it!\n");
 		}
+        
+        return 0; // Just need a single iteration for now
+
 		{ // force the calling of C's destructor
 			t3 = MPI_Wtime();
 			C = Mult_AnXBn_DoubleBuff<PTDOUBLEDOUBLE, ElementType, PSpMat<ElementType>::DCCols>(A, B);
@@ -148,10 +155,6 @@ int main(int argc, char *argv[])
 			{
 				SpParHelper::Print("ERROR in double non-CUDA  buffered multiplication, go fix it!\n");
 			}
-			// int64_t cnnz = C.getnnz();
-			// ostringstream tinfo;
-			// tinfo << "C has a total of " << cnnz << " nonzeros" << endl;
-			// SpParHelper::Print(tinfo.str());
 			SpParHelper::Print("Warmed up for DoubleBuff\n");
 			
 		}
@@ -185,7 +188,6 @@ int main(int argc, char *argv[])
 			cout << "Double buffered CUDA multiplications finished" << endl;
 			printf("%.6lf seconds elapsed per iteration\n", (t2 - t1) / (double)ITERATIONS);
 		}
-#endif
 	}
 	MPI_Finalize();
 	return 0;
