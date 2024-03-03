@@ -32,7 +32,7 @@ find_package(CUDA)
 
 
 if(CUDA_FOUND)
-  #target_compile_definitions(CombBLAS PUBLIC GPU_ENABLED)
+  target_compile_definitions(CombBLAS PUBLIC GPU_ENABLED)
   enable_language(CUDA)
   #set(CUDA_HOST_COMPILER "nvc++") # NVHPC requires this...sorry if this causes any issues for anyone
   set( CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS}" "--ftemplate-backtrace-limit 1 --expt-relaxed-constexpr --disable-warnings")
