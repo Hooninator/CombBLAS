@@ -34,7 +34,7 @@ def get_layers(ppn, nodes):
 
 def run(args):
     
-    combblas_cmd = f" combblas-spgemm {args.alg} $PSCRATCH/matrices/{args.matA}/{args.matA}.mtx $PSCRATCH/matrices/{args.matB}/{args.matB}.mtx args.code "
+    combblas_cmd = f" combblas-spgemm {args.alg} $PSCRATCH/matrices/{args.matA}/{args.matA}.mtx $PSCRATCH/matrices/{args.matB}/{args.matB}.mtx {args.code} "
     
     cmd_lst = []
 
@@ -48,11 +48,11 @@ def run(args):
         if args.alg=="3D":
             layers = get_layers(ppn, args.nodes)
             for l in layers:
-                combblas_cmd_tmp = combblas_cmd + str(l)
+                combblas_cmd_tmp = combblas_cmd + str(l) + " " + str(args.permute)
                 cmd  = srun_cmd + combblas_cmd_tmp 
                 cmd_lst.append(cmd)
         else:
-            cmd = srun_cmd + combblas_cmd
+            cmd = srun_cmd + combblas_cmd + "1 " + str(args.permute)
             cmd_lst.append(cmd)
     
     print(cmd_lst)
@@ -75,6 +75,7 @@ if __name__=="__main__":
     parser.add_argument("--matB", type=str)
     parser.add_argument("--code", type=int)
     parser.add_argument("--nodes", type=int)
+    parser.add_argument("--permute", type=int)
     args = parser.parse_args()
     result_lst = run(args)
     #write_output(args, result_lst)
