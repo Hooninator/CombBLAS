@@ -538,14 +538,12 @@ SpTuples<IT, NTO> * LocalHybridSpGEMM
     IT nnzc = colptrC[Bdcsc->nzc];
 
     
-   std::tuple<IT,IT,NTO> * tuplesC = static_cast<std::tuple<IT,IT,NTO> *> (::operator new (sizeof(std::tuple<IT,IT,NTO>[nnzc])));
+    std::tuple<IT,IT,NTO> * tuplesC = static_cast<std::tuple<IT,IT,NTO> *> (::operator new (sizeof(std::tuple<IT,IT,NTO>[nnzc])));
        
     std::vector<std::vector< std::pair<IT,IT>>> colindsVec(numThreads);
    
-     std::vector<std::vector< std::pair<IT,NTO>>> globalHashVecAll(numThreads); 
-     std::vector<std::vector< HeapEntry<IT,NT1>>> globalHeapVecAll(numThreads);
-
-
+    std::vector<std::vector< std::pair<IT,NTO>>> globalHashVecAll(numThreads); 
+    std::vector<std::vector< HeapEntry<IT,NT1>>> globalHeapVecAll(numThreads);
 
     SpDCCols<IT, NT1> A_Tran = A.TransposeConst();
     SpDCCols<IT, NT1> B_Tran = B.TransposeConst();
@@ -555,89 +553,55 @@ SpTuples<IT, NTO> * LocalHybridSpGEMM
     IT* A_Tran_IR;
     IT* A_Tran_JC;
     NT1* A_Tran_numx;
+
     IT* B_CP;
     IT* B_IR;
     IT* B_JC;
     NT2* B_numx;
+
     std::tuple<IT,IT,NTO> * tuplesC_d;
     IT * tuplesC_d_o;
     IT * tuplesC_d_t;
     NTO * tuplesC_d_th;
+
     uint * colptr_size_d;
     uint* curptr_d;
     IT * colptrC_d;
+
     cudaMalloc((void**) &curptr_d, sizeof(uint));
+
     cudaMalloc((void**) &tuplesC_d_o, (sizeof(IT[nnzc])));
     cudaMalloc((void**) &tuplesC_d_t, (sizeof(IT[nnzc])));
     cudaMalloc((void**) &tuplesC_d_th, (sizeof(NTO[nnzc])));
     cudaMalloc((void**) &tuplesC_d, (sizeof(std::tuple<IT,IT,NTO>[nnzc])));
+
     cudaMalloc((void**) &colptr_size_d, (sizeof(uint[Bdcsc->nzc])));
     cudaMemset(colptr_size_d, 0, sizeof(uint[Bdcsc->nzc]));
+
     cudaMalloc((void**) &A_Tran_CP, sizeof(IT[Adcsc_Tran->nzc + 1]));
     cudaMalloc((void**) &A_Tran_IR, sizeof(IT[Adcsc_Tran->nz]));
     cudaMalloc((void**) &A_Tran_JC, sizeof(IT[Adcsc_Tran->nzc]));
     cudaMalloc((void**) &A_Tran_numx, sizeof(NT1[Adcsc_Tran->nz]));
+
     cudaMalloc((void**) &B_CP, sizeof(IT[Bdcsc->nzc + 1]));
     cudaMalloc((void**) &B_IR, sizeof(IT[Bdcsc->nz]));
     cudaMalloc((void**) &B_JC, sizeof(IT[Bdcsc->nzc]));
     cudaMalloc((void**) &B_numx, sizeof(NT2[Bdcsc->nz]));
+
     cudaMalloc((void**) &colptrC_d, sizeof(IT[Bdcsc->nzc]));
     cudaMemcpy(colptrC_d, colptrC, sizeof(IT[Bdcsc->nzc]), cudaMemcpyHostToDevice);
+
     cudaMemcpy(A_Tran_CP, Adcsc_Tran->cp, sizeof(IT[Adcsc_Tran->nzc + 1]), cudaMemcpyHostToDevice);
     cudaMemcpy(A_Tran_IR, Adcsc_Tran->ir, sizeof(IT[Adcsc_Tran->nz]), cudaMemcpyHostToDevice);
     cudaMemcpy(A_Tran_JC, Adcsc_Tran->jc, sizeof(IT[Adcsc_Tran->nzc]), cudaMemcpyHostToDevice);
     cudaMemcpy(A_Tran_numx, Adcsc_Tran->numx, sizeof(NT1[Adcsc_Tran->nz]), cudaMemcpyHostToDevice);
+
     cudaMemcpy(B_CP, Bdcsc->cp, sizeof(IT[Bdcsc->nzc + 1]), cudaMemcpyHostToDevice);
     cudaMemcpy(B_IR, Bdcsc->ir, sizeof(IT[Bdcsc->nz]), cudaMemcpyHostToDevice);
     cudaMemcpy(B_JC, Bdcsc->jc, sizeof(IT[Bdcsc->nzc]), cudaMemcpyHostToDevice);
     cudaMemcpy(B_numx, Bdcsc->numx, sizeof(NT1[Bdcsc->nz]), cudaMemcpyHostToDevice);
-/*#ifdef THREADED
-#pragma omp parallel for
-#endif
-    for(size_t i=0; i < Bdcsc->nzc; ++i)
-    {
-        size_t nnzcolB = Bdcsc->cp[i+1] - Bdcsc->cp[i]; //nnz in the current column of B
-        int myThread = 0;
-
-#ifdef THREADED
-        myThread = omp_get_thread_num();
-#endif
-            uint* curptr = new uint;
-            *curptr = colptrC[i];
-            cudaMemcpy(curptr_d, curptr, sizeof(uint), cudaMemcpyHostToDevice);
-            delete curptr;
-            //uint curptr = colptrC[i];
-            /*for(size_t j = 0; j < Adcsc_Tran->nzc; ++j) {
-                bool made = false;
-                size_t r = Adcsc_Tran->cp[j];
-                for (size_t k = 0; k < nnzcolB; ++k) {
-                    while (r < Adcsc_Tran->cp[j + 1] && Bdcsc->ir[Bdcsc->cp[i]+k] > Adcsc_Tran->ir[r]) { 
-                        r++;
-                    }
-                    if (r >= Adcsc_Tran->cp[j + 1]) {
-                            break;
-                        }
-                    if (Bdcsc->ir[Bdcsc->cp[i]+k] == Adcsc_Tran->ir[r]) {
-                        NTO mrhs = Adcsc_Tran->numx[r] * Bdcsc->numx[Bdcsc->cp[i]+k];
-                        if(true) {
-                            if (made) {
-                                std::get<2>(tuplesC[curptr - 1]) = std::get<2>(tuplesC[curptr - 1]) + mrhs;
-                            } else {
-                                made = true;
-                                //tuplesC[curptr++] = std::make_tuple(Adcsc_Tran->jc[j], Bdcsc->jc[i], mrhs);
-                                std::get<0>(tuplesC[curptr]) = Adcsc_Tran->jc[j];
-                                std::get<1>(tuplesC[curptr]) = Bdcsc->jc[i];
-                                std::get<2>(tuplesC[curptr++]) = mrhs;
-                            }
-                        }
-                    }
-                }
-            }
-              //cudaDeviceSynchronize();
-    }*/
 
     transformColumn(Adcsc_Tran->nzc, A_Tran_CP, A_Tran_IR, A_Tran_JC, A_Tran_numx, B_CP, B_IR, B_JC, B_numx, tuplesC_d, colptrC_d, Bdcsc->nzc);
-    
     
     if(clearA)
         delete const_cast<SpDCCols<IT, NT1> *>(&A);
@@ -648,7 +612,6 @@ SpTuples<IT, NTO> * LocalHybridSpGEMM
     
     if(deleteAux)
     	delete [] aux;
-    //std::cout << "Made it to receive" << std::endl;
     IT * tuplesC_o = static_cast<IT *> (::operator new (sizeof(IT[nnzc])));
     IT * tuplesC_t = static_cast<IT *> (::operator new (sizeof(IT[nnzc])));
     NTO * tuplesC_th = static_cast<NTO *> (::operator new (sizeof(NTO[nnzc])));
@@ -656,34 +619,16 @@ SpTuples<IT, NTO> * LocalHybridSpGEMM
     uint * colptr_size = static_cast<uint *> (::operator new (sizeof(uint[Bdcsc->nzc])));
     cudaMemcpy(tuplesC, tuplesC_d, sizeof(std::tuple<IT,IT,NTO>[nnzc]), cudaMemcpyDeviceToHost);
     gpuErrchk( cudaPeekAtLastError() );
-gpuErrchk( cudaDeviceSynchronize() );
-    /*std::cout << "Made it to loop" << std::endl;
-   #ifdef THREADED
-#pragma omp parallel for
-#endif
-    for (IT i = 0; i < Bdcsc -> nzc; ++i) {
-        //std::cout << "Getting: " << i << std::endl;
-        for (IT j = 0; j < colptr_size[i]; ++j) {
-            IT in = colptrC[i] + j;
-            //std::cout << "Grabbed: " << j << " with " << in << std::endl;
-            tuplesC[in] = std::make_tuple(tuplesC_o[in], tuplesC_t[in], tuplesC_th[in]);
-            //printf("Made tuple at in %i, with values %i, %i, and %i", in, tuplesC_o[in], tuplesC_t[in], tuplesC_th[in]);
-            //std::cout << "Built!" << std::endl;
-            //std::cout << "Done" <<std::endl;
-        }
-    }*/
+    gpuErrchk( cudaDeviceSynchronize() );
+
     delete [] colptrC;
     delete [] flopptr;
     delete [] tuplesC_o;
     delete [] tuplesC_t;
     delete [] tuplesC_th;
     delete [] colptr_size;
-    //std::cout << "Made it to build" << std::endl;
     SpTuples<IT, NTO>* spTuplesC = new SpTuples<IT, NTO> (nnzc, mdim, ndim, tuplesC, false, true);
 
-    //std::cout << "Made it to return" << std::endl;
-    // std::cout << "localspgemminfo," << flop << "," << nnzc << "," << compression_ratio << "," << t1-t0 << std::endl;
-    // std::cout << hashSelected << ", " << Bdcsc->nzc << ", " << (float)hashSelected / Bdcsc->nzc << std::endl;
     return spTuplesC;
 }
 #endif
