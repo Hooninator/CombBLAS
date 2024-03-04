@@ -611,30 +611,17 @@ void SpParHelper::BCastMatrix(MPI_Comm & comm1d, SpMat<IT,NT,DER> & Matrix, cons
 template<typename IT, typename NT>	
 void SpParHelper::BCastMatrixCUDA(MPI_Comm & comm1d, dCSR<NT> & Matrix, const std::vector<IT> & essentials, int root)
 {
-	cudaDeviceSynchronize();
 	int myrank;
 	MPI_Comm_rank(comm1d, &myrank);
+
 	if(myrank != root)
 	{
 		Matrix.alloc(essentials[2],essentials[1],essentials[0],true);		
 	}
-	//std::cout << myrank << " " <<  Matrix.rows << " " << Matrix.cols << " " << Matrix.nnz << std::endl;
-	cudaDeviceSynchronize();
-	//std::cout << myrank << " BCASTING FIRST FROM " << root << std::endl;
-	//if(!essentials[0]) return;
-	//size_t free;
-	//size_t total;
-	//cudaMemGetInfo(&free, &total);
-	//std::cout << myrank << " has " << free << " of " << total << std::endl;
-	MPI_Bcast(Matrix.row_offsets, Matrix.rows + 1, MPIType<uint>(), root, comm1d);
-	cudaDeviceSynchronize();
-	//std::cout << myrank << " BCASTING SECOND" << std::endl;
-	MPI_Bcast(Matrix.col_ids, Matrix.nnz, MPIType<uint>(), root, comm1d);
-	cudaDeviceSynchronize();
-	//std::cout << "BCASTING 2 " << myrank << std::endl;
+
+	MPI_Bcast((void*)(Matrix.row_offsets), Matrix.rows+1, MPI_UNSIGNED, root, comm1d);
+	MPI_Bcast(Matrix.col_ids, Matrix.nnz, MPI_UNSIGNED, root, comm1d);
 	MPI_Bcast(Matrix.data, Matrix.nnz, MPIType<NT>(), root, comm1d);	
-	cudaDeviceSynchronize();
-	//std::cout << "BCAST DONE " << myrank << std::endl;
 }
 
 #endif
