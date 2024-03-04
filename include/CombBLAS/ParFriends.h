@@ -853,7 +853,7 @@ SpParMat<IU,NUO,UDERO> Mult_AnXBn_DoubleBuff
 
 	int stages, dummy; 	// last two parameters of ProductGrid are ignored for Synch multiplication
 	std::shared_ptr<CommGrid> GridC = ProductGrid((A.commGrid).get(), (B.commGrid).get(), stages, dummy, dummy);
-	
+
     LIA C_m = A.spSeq->getnrow();
 	LIB C_n = B.spSeq->getncol();
     
@@ -884,6 +884,9 @@ SpParMat<IU,NUO,UDERO> Mult_AnXBn_DoubleBuff
 	int Bself = (B.commGrid)->GetRankInProcCol();	
 
     double mpi_overhead = 0.0;
+    double mult_time = 0;
+    double comm_time = 0;
+    double stime, etime;
     
 	for(int i = 0; i < stages; ++i) 
 	{
@@ -902,7 +905,14 @@ SpParMat<IU,NUO,UDERO> Mult_AnXBn_DoubleBuff
 			}
 			ARecv = new UDERA();				// first, create the object
 		}
+#ifdef TIMING
+        stime = MPI_Wtime();
+#endif
 		SpParHelper::BCastMatrix(GridC->GetRowWorld(), *ARecv, ess, i);	// then, receive its elements	
+#ifdef TIMING
+        etime = MPI_Wtime();
+        comm_time += (etime - stime);
+#endif
 		ess.clear();	
 		if(i == Bself)
 		{
@@ -917,7 +927,14 @@ SpParMat<IU,NUO,UDERO> Mult_AnXBn_DoubleBuff
 			}	
 			BRecv = new UDERB();
 		}
+#ifdef TIMING
+        stime = MPI_Wtime();
+#endif
 		SpParHelper::BCastMatrix(GridC->GetColWorld(), *BRecv, ess, i);	// then, receive its elements
+#ifdef TIMING
+        etime = MPI_Wtime();
+        comm_time += (etime - stime);
+#endif
 		
 		// before activating this remove transposing B1seq
         	/*
@@ -932,10 +949,17 @@ SpParMat<IU,NUO,UDERO> Mult_AnXBn_DoubleBuff
 // load results  onto CPU.
         
          //double start = MPI_Wtime();
+#ifdef TIMING
+        stime = MPI_Wtime();
+#endif
 		SpTuples<LIC,NUO> * C_cont = LocalHybridSpGEMM<SR, NUO>
                 	(*ARecv, *BRecv, // parameters themselves
                  	i != Aself,    // 'delete A' condition
                  	i != Bself);   // 'delete B' condition
+#ifdef TIMING
+        etime = MPI_Wtime();
+        mult_time += (etime - stime);
+#endif
 
                             //printf("O = %i\n", C_cont->getnnz());
 //mpi_overhead += MPI_Wtime() - start;
@@ -970,7 +994,15 @@ SpParMat<IU,NUO,UDERO> Mult_AnXBn_DoubleBuff
 			ARecv = new UDERA();				// first, create the object
 		}
 
+#ifdef TIMING
+        stime = MPI_Wtime();
+#endif
+
 		SpParHelper::BCastMatrix(GridC->GetRowWorld(), *ARecv, ess, i);	// then, receive its elements	
+#ifdef TIMING
+        etime = MPI_Wtime();
+        comm_time += (etime - stime);
+#endif
 		ess.clear();	
 		
 		if(i == Bself)
@@ -986,7 +1018,14 @@ SpParMat<IU,NUO,UDERO> Mult_AnXBn_DoubleBuff
 			}	
 			BRecv = new UDERB();
 		}
+#ifdef TIMING
+        stime = MPI_Wtime();
+#endif
 		SpParHelper::BCastMatrix(GridC->GetColWorld(), *BRecv, ess, i);	// then, receive its elements
+#ifdef TIMING
+        etime = MPI_Wtime();
+        comm_time += (etime - stime);
+#endif
 
         	// before activating this remove transposing B2seq
         	/*
@@ -999,10 +1038,17 @@ SpParMat<IU,NUO,UDERO> Mult_AnXBn_DoubleBuff
         
         	*/
         //double start = MPI_Wtime();
+#ifdef TIMING
+        stime = MPI_Wtime();
+#endif
         	SpTuples<LIC,NUO> * C_cont = LocalHybridSpGEMM<SR, NUO>
                 	(*ARecv, *BRecv, // parameters themselves
                  	i != Aself,    // 'delete A' condition
                  	i != Bself);   // 'delete B' condition
+#ifdef TIMING
+        etime = MPI_Wtime();
+        mult_time += (etime - stime);
+#endif
          //mpi_overhead += MPI_Wtime() - start;
 		if(!C_cont->isZero())
 			tomerge.push_back(C_cont);
@@ -1038,6 +1084,12 @@ SpParMat<IU,NUO,UDERO> Mult_AnXBn_DoubleBuff
 		delete B2seq;
 		const_cast< UDERB* >(B.spSeq)->Transpose();	// transpose back to original
 	}
+#ifdef TIMING
+    int id;
+    MPI_Comm_rank( MPI_COMM_WORLD, &id);
+    if (id==0) fprintf(stdout, "[Mult] %lf\n", mult_time);
+    if (id==0) fprintf(stdout, "[Comm] %lf\n", comm_time);
+#endif
 
         //printf("%.6lf\n", mpi_overhead);
 	UDERO * C = new UDERO(MergeAll<SR>(tomerge, C_m, C_n,true), false);
@@ -1117,8 +1169,10 @@ void convertCSR(UDERA *&ARecv, dCSR<NU1> &input_GPU, int id)
 }
 
 template <typename SR, typename NU1, typename NU2, typename NUO>
-CSR<NUO> GPULocalMultiply(dCSR<NU1>& A, dCSR<NU2>& B)
+CSR<NUO> GPULocalMultiply(dCSR<NU1>& A, dCSR<NU2>& B, double * mem_movement_time=NULL, double * mult_time=NULL)
 {
+    double stime, etime;
+
     const int Threads = 128;
     const int BlocksPerMP = 1;
     const int NNZPerThread = 2;
@@ -1137,15 +1191,29 @@ CSR<NUO> GPULocalMultiply(dCSR<NU1>& A, dCSR<NU2>& B)
 
     const bool Debug_Mode = false;
     ExecutionStats stats;
-
+#ifdef TIMING
+    stime = MPI_Wtime();
+#endif
     ACSpGEMM::Multiply<Arith_SR>(
         A, B, result_mat_GPU,
         DefaultTraits, stats, Debug_Mode, semiring2);
-
     gpuErrchk(cudaDeviceSynchronize());
+#ifdef TIMING
+    etime = MPI_Wtime();
+    if (mult_time!=NULL)
+        *mult_time += (etime - stime);
+#endif
     CSR<NUO> result_mat_CPU;
     size_t it = 0;
+#ifdef TIMING
+    stime = MPI_Wtime();
+#endif
     convert(result_mat_CPU, result_mat_GPU);
+#ifdef TIMING
+    etime = MPI_Wtime();
+    if (mem_movement_time!=NULL)
+        *mem_movement_time += (etime - stime);
+#endif
     cudaDeviceSynchronize();
     return result_mat_CPU;
 }
@@ -1192,9 +1260,10 @@ SpParMat<IU, NUO, UDERO> Mult_AnXBn_DoubleBuff_CUDA(SpParMat<IU, NU1, UDERA> &A,
     MPI_Comm_rank(MPI_COMM_WORLD, &id);
 
     int devs;
-
     cudaGetDeviceCount(&devs);
+
     cudaSetDevice(id % devs); // Prevents crashes where processes > # devs
+                              
     LIA C_m = A.spSeq->getnrow();
     LIB C_n = B.spSeq->getncol();
 
@@ -1257,7 +1326,6 @@ SpParMat<IU, NUO, UDERO> Mult_AnXBn_DoubleBuff_CUDA(SpParMat<IU, NU1, UDERA> &A,
                                        // matrix in this row
         }
 
-        MPI_Barrier(GridC->GetRowWorld());
 
         SpParHelper::BCastMatrixCUDA<uint, NU1>(GridC->GetRowWorld(),
                                                 input_A_recv_GPU, ess, i); // then, receive its elements
@@ -1445,6 +1513,360 @@ SpParMat<IU, NUO, UDERO> Mult_AnXBn_DoubleBuff_CUDA(SpParMat<IU, NU1, UDERA> &A,
     }
     UDERO *C = new UDERO(MergeAll<SR>(tomerge, C_m, C_n, true), false);
     cudaDeviceSynchronize();
+
+    return SpParMat<IU, NUO, UDERO>(
+        C, GridC); // return the result object
+}
+
+
+/**
+ * Parallel C = A*B routine that uses a double buffered broadcasting scheme, but
+ * this time with CUDA + cpu cores
+ * @pre { Input matrices, A and B, should not alias }
+ * Most memory efficient version available. Total stages: 2*sqrt(p)
+ * Memory requirement during first sqrt(p) stages: <= (3/2)*(nnz(A)+nnz(B))+(1/2)*nnz(C)
+ * Memory requirement during second sqrt(p) stages: <= nnz(A)+nnz(B)+nnz(C)
+ * Final memory requirement: nnz(C) if clearA and clearB are true
+ **/
+template <typename SR, typename NUO, typename UDERO, typename IU, typename NU1,
+          typename NU2, typename UDERA, typename UDERB>
+SpParMat<IU, NUO, UDERO> Mult_AnXBn_DoubleBuff_Hetgen(SpParMat<IU, NU1, UDERA> &A,
+                                                    SpParMat<IU, NU2, UDERB> &B,
+                                                    bool clearA = false,
+                                                    bool clearB = false)
+
+{
+    if (!CheckSpGEMMCompliance(A, B))
+    {
+        return SpParMat<IU, NUO, UDERO>();
+    }
+    typedef typename UDERA::LocalIT LIA;
+    typedef typename UDERB::LocalIT LIB;
+    typedef typename UDERO::LocalIT LIC;
+
+    double over = 0;
+    static_assert(
+        std::is_same<LIA, LIB>::value,
+        "local index types for both input matrices should be the same");
+    static_assert(
+        std::is_same<LIA, LIC>::value,
+        "local index types for input and output matrices should be the same");
+
+    int stages, dummy; // last two parameters of ProductGrid are ignored for
+                       // Synch multiplication
+    std::shared_ptr<CommGrid> GridC = ProductGrid(
+        (A.commGrid).get(), (B.commGrid).get(), stages, dummy, dummy);
+
+    int id;
+    MPI_Comm_rank(MPI_COMM_WORLD, &id);
+
+    int devs;
+    cudaGetDeviceCount(&devs);
+
+    cudaSetDevice(id % devs); // Prevents crashes where processes > # devs
+                              
+    LIA C_m = A.spSeq->getnrow();
+    LIB C_n = B.spSeq->getncol();
+
+    UDERA *A1seq = new UDERA();
+    UDERA *A2seq = new UDERA();
+    UDERB *B1seq = new UDERA();
+    UDERB *B2seq = new UDERB();
+    int Aself = (A.commGrid)->GetRankInProcRow();
+    int Bself = (B.commGrid)->GetRankInProcCol();
+    
+    
+    double t1 = MPI_Wtime();
+    (A.spSeq)->Split(*A1seq, *A2seq);
+    const_cast<UDERB *>(B.spSeq)->Transpose();
+    (B.spSeq)->Split(*B1seq, *B2seq);
+
+    dCSR<NU1> input_A_GPU;
+    dCSR<NU2> input_B_GPU;
+    Wrap_SR<NU1, NU2, NUO, SR> semiring;
+
+    gpuErrchk(cudaDeviceSynchronize());
+
+    // Transpose back for the column-by-column algorithm
+    const_cast<UDERB *>(B1seq)->Transpose();
+    const_cast<UDERB *>(B2seq)->Transpose();
+    LIA **ARecvSizes = SpHelper::allocate2D<LIA>(UDERA::esscount, stages);
+    LIB **BRecvSizes = SpHelper::allocate2D<LIB>(UDERB::esscount, stages);
+
+    SpParHelper::GetSetSizes(*A1seq, ARecvSizes, (A.commGrid)->GetRowWorld());
+    SpParHelper::GetSetSizes(*B1seq, BRecvSizes, (B.commGrid)->GetColWorld());
+
+    // Remotely fetched matrices are stored as pointers
+    UDERA *ARecv;
+    UDERB *BRecv;
+    std::vector<SpTuples<LIC, NUO> *> tomerge;
+
+    double mem_movement_time = 0;
+    double stime, etime;
+#ifdef TIMING
+    stime = MPI_Wtime();
+#endif
+    convertCSR<UDERA, NU1>(A1seq, input_A_GPU, id);
+    convertCSR<UDERB, NU2>(B1seq, input_B_GPU, id);
+#ifdef TIMING
+    etime = MPI_Wtime();
+    mem_movement_time += (etime - stime);
+#endif
+
+    double mpi_overhead = 0.0;
+    double comm_time = 0;
+    double mult_time = 0;
+    double merge_time = 0;
+
+    for (int i = 0; i < stages; ++i)
+    {
+        dCSR<NU1> input_A_recv_GPU;
+        dCSR<NU2> input_B_recv_GPU;
+        std::vector<LIA> ess;
+        if (i == Aself)
+        {
+            input_A_recv_GPU = input_A_GPU; // shallow-copy
+        }
+        else
+        {
+
+            ARecv = new UDERA(); // first, create the object
+        }
+        ess.resize(UDERA::esscount);
+        for (int j = 0; j < UDERA::esscount; ++j)
+        {
+            ess[j] = ARecvSizes[j][i]; // essentials of the ith
+                                       // matrix in this row
+        }
+
+#ifdef TIMING
+        stime = MPI_Wtime();
+#endif
+
+        SpParHelper::BCastMatrixCUDA<uint, NU1>(GridC->GetRowWorld(),
+                                                input_A_recv_GPU, ess, i); // then, receive its elements
+#ifdef TIMING
+        etime = MPI_Wtime();
+        comm_time += (etime - stime);
+#endif
+        
+        ess.clear();
+        if (i == Bself)
+        {
+            input_B_recv_GPU = input_B_GPU; // shallow-copy
+        }
+        else
+        {
+
+            BRecv = new UDERB();
+        }
+        ess.resize(UDERB::esscount);
+        for (int j = 0; j < UDERB::esscount; ++j)
+        {
+            ess[j] = BRecvSizes[j][i];
+        }
+
+#ifdef TIMING
+        stime = MPI_Wtime();
+#endif
+        SpParHelper::BCastMatrixCUDA(GridC->GetColWorld(),
+                                     input_B_recv_GPU, ess, i); // then, receive its elements
+        
+#ifdef TIMING
+        etime = MPI_Wtime();
+        comm_time += (etime - stime);
+#endif
+        if(input_B_recv_GPU.nnz == 0 || input_A_recv_GPU.nnz == 0) continue;
+        // load results  onto CPU.
+
+        CSR<NUO> result_mat_CPU = GPULocalMultiply<Arith_SR, NU1, NU2, NUO>(input_B_recv_GPU, input_A_recv_GPU,
+                                                                            &mem_movement_time, &mult_time);
+        over += MPI_Wtime() - t1;
+        size_t it = 0;
+        std::tuple<LIC, LIC, NUO> *tuplesC =
+            static_cast<std::tuple<LIC, LIC, NUO> *>(::operator new(
+                sizeof(std::tuple<LIC, LIC, NUO>[result_mat_CPU.nnz])));
+        for (LIC i = 0; i < result_mat_CPU.rows; ++i)
+        {
+
+            for (LIC j = result_mat_CPU.row_offsets[i];
+                 j < result_mat_CPU.row_offsets[i + 1]; ++j)
+            {
+                tuplesC[it++] =
+                    std::make_tuple(result_mat_CPU.col_ids[j],
+                                    i, result_mat_CPU.data[j]);
+            }
+        }
+
+        SpTuples<LIC, NUO> *C_cont = new SpTuples<LIC, NUO>(
+            result_mat_CPU.nnz, result_mat_CPU.rows,
+            result_mat_CPU.cols, tuplesC, false, true);
+        if (i != Aself)
+            delete ARecv;
+        if (i != Bself)
+            delete BRecv;
+
+        if (!C_cont->isZero())
+            tomerge.push_back(C_cont);
+        else
+            delete C_cont;
+    }
+    if (clearA)
+        delete A1seq;
+    if (clearB)
+        delete B1seq;
+
+    // Set the new dimensions
+    t1 = MPI_Wtime();
+    dealloc(input_A_GPU);
+    dealloc(input_B_GPU);
+    cudaDeviceSynchronize();
+    dCSR<NU1> input_A2_GPU;
+    dCSR<NU2> input_B2_GPU;
+#ifdef TIMING
+    stime = MPI_Wtime();
+#endif
+    convertCSR<UDERA, NU1>(A2seq, input_A2_GPU, id);
+    convertCSR<UDERB, NU2>(B2seq, input_B2_GPU, id);
+#ifdef TIMING
+    etime = MPI_Wtime();
+    mem_movement_time += etime - stime;
+#endif
+
+    SpParHelper::GetSetSizes(*A2seq, ARecvSizes, (A.commGrid)->GetRowWorld());
+    SpParHelper::GetSetSizes(*B2seq, BRecvSizes, (B.commGrid)->GetColWorld());
+
+    for (int i = 0; i < stages; ++i)
+    {
+        dCSR<NU1> input_A_recv_GPU;
+        dCSR<NU2> input_B_recv_GPU;
+        // std::cout << Aself << " " << Bself << " starting stage " << i
+        // << std::endl;
+        std::vector<LIA> ess;
+        if (i == Aself)
+        {
+            input_A_recv_GPU = input_A2_GPU; // shallow-copy
+        }
+        else
+        {
+
+            ARecv = new UDERA(); // first, create the object
+        }
+        ess.resize(UDERA::esscount);
+        for (int j = 0; j < UDERA::esscount; ++j)
+        {
+            ess[j] = ARecvSizes[j][i]; // essentials of the ith
+                                       // matrix in this row
+        }
+#ifdef TIMING
+        stime = MPI_Wtime();
+#endif
+
+        SpParHelper::BCastMatrixCUDA<uint, NU1>(GridC->GetRowWorld(),
+                                                input_A_recv_GPU, ess, i); // then, receive its elements
+#ifdef TIMING
+        etime = MPI_Wtime();
+        comm_time += (etime - stime);
+#endif
+        ess.clear();
+        if (i == Bself)
+        {
+            input_B_recv_GPU = input_B2_GPU; // shallow-copy
+        }
+        else
+        {
+
+            BRecv = new UDERB();
+        }
+        ess.resize(UDERB::esscount);
+        for (int j = 0; j < UDERB::esscount; ++j)
+        {
+            ess[j] = BRecvSizes[j][i];
+        }
+
+#ifdef TIMING
+        stime = MPI_Wtime();
+#endif
+        SpParHelper::BCastMatrixCUDA(GridC->GetColWorld(),
+                                     input_B_recv_GPU, ess, i); // then, receive its elements
+
+#ifdef TIMING
+        etime = MPI_Wtime();
+        comm_time += (etime - stime);
+#endif
+
+        CSR<NUO> result_mat_CPU = GPULocalMultiply<Arith_SR, NU1, NU2, NUO>(input_B_recv_GPU, input_A_recv_GPU,
+                                                                            &mem_movement_time, &mult_time);
+        gpuErrchk(cudaDeviceSynchronize());
+        over += MPI_Wtime() - t1;
+        size_t it = 0;
+
+        std::tuple<LIC, LIC, NUO> *tuplesC =
+            static_cast<std::tuple<LIC, LIC, NUO> *>(::operator new(
+                sizeof(std::tuple<LIC, LIC, NUO>[result_mat_CPU.nnz])));
+        for (LIC i = 0; i < result_mat_CPU.rows; ++i)
+        {
+            for (LIC j = result_mat_CPU.row_offsets[i];
+                 j < result_mat_CPU.row_offsets[i + 1]; ++j)
+            {
+                tuplesC[it++] =
+                    std::make_tuple(result_mat_CPU.col_ids[j],
+                                    i, result_mat_CPU.data[j]);
+            }
+        }
+
+        SpTuples<LIC, NUO> *C_cont = new SpTuples<LIC, NUO>(
+            result_mat_CPU.nnz, result_mat_CPU.rows,
+            result_mat_CPU.cols, tuplesC, false, true);
+        if (i != Aself)
+            delete ARecv;
+            
+        if (i != Bself)
+            delete BRecv;
+
+        if (!C_cont->isZero())
+            tomerge.push_back(C_cont);
+        else
+            delete C_cont;
+    }
+    SpHelper::deallocate2D(ARecvSizes, UDERA::esscount);
+    SpHelper::deallocate2D(BRecvSizes, UDERB::esscount);
+    if (clearA)
+    {
+        delete A2seq;
+        delete A.spSeq;
+        A.spSeq = NULL;
+    }
+    else
+    {
+        (A.spSeq)->Merge(*A1seq, *A2seq);
+        delete A1seq;
+        delete A2seq;
+    }
+    if (clearB)
+    {
+        delete B2seq;
+        delete B.spSeq;
+        B.spSeq = NULL;
+    }
+    else
+    {
+        B1seq->Transpose();
+        B2seq->Transpose();
+        (B.spSeq)->Merge(*B1seq, *B2seq);
+        delete B1seq;
+        delete B2seq;
+        const_cast<UDERB *>(B.spSeq)
+            ->Transpose(); // transpose back to original
+    }
+    UDERO *C = new UDERO(MergeAll<SR>(tomerge, C_m, C_n, true), false);
+    cudaDeviceSynchronize();
+#ifdef TIMING
+    if (id==0) fprintf(stdout, "[MemMovement]: %lf\n", mem_movement_time);
+    if (id==0) fprintf(stdout, "[Mult]: %lf\n", mult_time);
+    if (id==0) fprintf(stdout, "[Comm]: %lf\n", comm_time);
+#endif
+
     return SpParMat<IU, NUO, UDERO>(
         C, GridC); // return the result object
 }
