@@ -143,6 +143,10 @@ def eval_xgb(args, df, feature_names, label, test_problems, train_problems):
     kendall_sum_test = 0
     rmse_sum_train = 0
     rmse_sum_test = 0
+    diff_sum_train = 0
+    diff_sum_test = 0
+    n_correct_train = 0
+    n_correct_test = 0
     
     for problem in test_problems+train_problems:
         
@@ -150,10 +154,18 @@ def eval_xgb(args, df, feature_names, label, test_problems, train_problems):
         
         df_problem = df[df['trial']==problem]
         
+        best_time_actual = df_problem['summed-time'].min(axis=0)
+        
         X = df_problem[feature_names].values
         y = df_problem[[label]].values
         
         y_pred = bst.predict(xgb.DMatrix(X))
+        
+        best_time_predicted = df_problem['summed-time'].iloc[np.argmin(y_pred)]
+        
+        is_correct = int(np.argmin(np.array(df_problem['summed-time']))==np.argmin(y_pred))
+        
+        diff = abs(best_time_actual - best_time_predicted)
         
         kendall = kendalltau(y, y_pred)
         rmse = ((np.linalg.norm(y - y_pred)**2)/len(y))**(1/2)
@@ -161,12 +173,16 @@ def eval_xgb(args, df, feature_names, label, test_problems, train_problems):
         if problem in test_problems:
             kendall_sum_test += kendall.correlation
             rmse_sum_test += rmse
+            diff_sum_test += diff
+            n_correct_test += is_correct
         else:
             kendall_sum_train += kendall.correlation
             rmse_sum_train += rmse
+            diff_sum_train += diff
+            n_correct_train += is_correct
 
         plt.scatter(range(len(y)), y, label="Actual")
-        plt.scatter(range(len(y)), y_pred, label=f"Predicted\n(kt={kendall.correlation})")
+        plt.scatter(range(len(y)), y_pred, label=f"Predicted\n(kt={kendall.correlation})\n(rmse={rmse})")
         plt.ylabel("Runtime (s)")
         plt.xlabel("Sample index")
         plt.title(f"Actual vs. Predicted Runtime for {problem}")
@@ -178,6 +194,10 @@ def eval_xgb(args, df, feature_names, label, test_problems, train_problems):
     print(f"----AVERAGE KT FOR TEST DATA: {kendall_sum_test/len(test_problems)}")
     print(f"----AVERAGE RMSE FOR TRAINING DATA: {rmse_sum_train/len(train_problems)}")
     print(f"----AVERAGE RMSE FOR TEST DATA: {rmse_sum_test/len(test_problems)}")
+    print(f"----AVERAGE DIFF FOR TRAINING DATA: {diff_sum_train/len(train_problems)}s")
+    print(f"----AVERAGE DIFF FOR TEST DATA: {diff_sum_test/len(test_problems)}s")
+    print(f"----NUMBER CORRECT FOR TRAINING DATA: {n_correct_train}/{len(train_problems)}")
+    print(f"----NUMBER CORRECT FOR TEST DATA: {n_correct_test}/{len(test_problems)}")
     
 
 def split(df, feature_names, label, size):
@@ -212,7 +232,7 @@ if __name__=="__main__":
     # Load in dataframe
     df = load_spgemm2d_data(args.infile)
     
-    X_train, X_test, y_train, y_test, train_problems, test_problems = split(df, feature_names, args.label, 0.1)
+    X_train, X_test, y_train, y_test, train_problems, test_problems = split(df, feature_names, args.label, 0.33)
     print(f"Train size: {len(X_train)}")
     print(f"Test size: {len(X_test)}")
     
