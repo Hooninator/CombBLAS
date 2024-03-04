@@ -120,12 +120,21 @@ int main(int argc, char *argv[])
         SpParHelper::Print("Done reading, starting multiply...\n");
 
 		double t3 = MPI_Wtime();
-		C = Mult_AnXBn_DoubleBuff_CUDA<PTDOUBLEDOUBLE, double, PSpMat<double>::DCCols>(A, B);
+		C = Mult_AnXBn_DoubleBuff_Hetgen<PTDOUBLEDOUBLE, double, PSpMat<double>::DCCols>(A, B);
 		double t4 = MPI_Wtime();
         double total_time = t4 - t3;
         MPI_Allreduce(MPI_IN_PLACE, &total_time, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
         if (myrank==0)
-            std::cout << "Time taken for GPU: " << total_time << std::endl;
+            std::cout << "Time taken for Hetgen: " << total_time << std::endl;
+
+        /*t3 = MPI_Wtime();
+        C = Mult_AnXBn_DoubleBuff_CUDA<PTDOUBLEDOUBLE, double, PSpMat<double>::DCCols>(A,B);
+        t4 = MPI_Wtime();
+        total_time = t4 - t3;
+        MPI_Allreduce(MPI_IN_PLACE, &total_time, 1,MPI_DOUBLE, MPI_MAX,  MPI_COMM_WORLD);
+        if (myrank==0)
+            std::cout << "Time taken for GPU: " << total_time  << std::endl;
+        */
 
         t3 = MPI_Wtime();
         C = Mult_AnXBn_DoubleBuff<PTDOUBLEDOUBLE, double, PSpMat<double>::DCCols>(A,B);
