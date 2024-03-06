@@ -371,7 +371,7 @@ void MCLPruneRecoverySelect(SpParMat<IT,NT,DER> & A, NT hardThreshold, IT select
 template <typename SR, typename IU, typename NU1, typename NU2, typename UDERA, typename UDERB> 
 IU EstimateFLOP 
 		(SpParMat<IU,NU1,UDERA> & A, SpParMat<IU,NU2,UDERB> & B, bool clearA = false, bool clearB = false,
-            bool compute_local=false)
+            IU * localFLOPS=nullptr)
 
 {
     int myrank;
@@ -462,7 +462,7 @@ IU EstimateFLOP
 	//if(!clearB)
 	//	const_cast< UDERB* >(B.spSeq)->Transpose();	// transpose back to original
     
-    if (compute_local) return local_flops;
+    if (localFLOPS!=nullptr)  *localFLOPS = local_flops;
 
     IU global_flops = 0;
     MPI_Allreduce(&local_flops, &global_flops, 1, MPI_LONG_LONG_INT, MPI_SUM, A.getcommgrid()->GetWorld());
@@ -1880,7 +1880,8 @@ SpParMat<IU, NUO, UDERO> Mult_AnXBn_DoubleBuff_Hetgen(SpParMat<IU, NU1, UDERA> &
  **/  
 template <typename SR, typename NUO, typename UDERO, typename IU, typename NU1, typename NU2, typename UDERA, typename UDERB> 
 SpParMat<IU, NUO, UDERO> Mult_AnXBn_Synch 
-		(SpParMat<IU,NU1,UDERA> & A, SpParMat<IU,NU2,UDERB> & B, bool clearA = false, bool clearB = false )
+		(SpParMat<IU,NU1,UDERA> & A, SpParMat<IU,NU2,UDERB> & B, bool clearA = false, bool clearB = false ,
+         std::map<std::string, std::string> * timingsMap = nullptr)
 
 {
     int myrank;
@@ -1910,6 +1911,11 @@ SpParMat<IU, NUO, UDERO> Mult_AnXBn_Synch
 	int Aself = (A.commGrid)->GetRankInProcRow();
 	int Bself = (B.commGrid)->GetRankInProcCol();	
 	
+    double t0, t1;
+    double bcastATime = 0;
+    double bcastBTime = 0;
+    double localMultTime = 0;
+    double mergeTime = 0;
 	for(int i = 0; i < stages; ++i) 
 	{
 		std::vector<IU> ess;	
@@ -1926,7 +1932,14 @@ SpParMat<IU, NUO, UDERO> Mult_AnXBn_Synch
 			}
 			ARecv = new UDERA();				// first, create the object
 		}
+#ifdef PROFILE
+        t0 = MPI_Wtime();
+#endif
 		SpParHelper::BCastMatrix(GridC->GetRowWorld(), *ARecv, ess, i);	// then, receive its elements	
+#ifdef PROFILE
+        t1 = MPI_Wtime();
+        bcastAtime += (t1 - t0);
+#endif
 		ess.clear();	
 		
 		if(i == Bself)
@@ -1942,13 +1955,26 @@ SpParMat<IU, NUO, UDERO> Mult_AnXBn_Synch
 			}	
 			BRecv = new UDERB();
 		}
+#ifdef PROFILE
+        t0 = MPI_Wtime();
+#endif
 		SpParHelper::BCastMatrix(GridC->GetColWorld(), *BRecv, ess, i);	// then, receive its elements
+#ifdef PROFILE
+        t1 = MPI_Wtime();
+        bcastBtime += (t1 - t0);
+#endif
 
+#ifdef PROFILE
+        t0 = MPI_Wtime();
+#endif
 		SpTuples<IU,NUO> * C_cont = LocalHybridSpGEMM<SR, NUO>
 						(*ARecv, *BRecv, // parameters themselves
 						i != Aself, 	// 'delete A' condition
 						i != Bself);	// 'delete B' condition
-		
+#ifdef PROFILE
+        t1 = MPI_Wtime();
+        localMultTime += (t1 - t0);
+#endif
 		if(!C_cont->isZero()) 
 			tomerge.push_back(C_cont);
 
@@ -1973,13 +1999,26 @@ SpParMat<IU, NUO, UDERO> Mult_AnXBn_Synch
 	SpHelper::deallocate2D(ARecvSizes, UDERA::esscount);
 	SpHelper::deallocate2D(BRecvSizes, UDERB::esscount);
 
-
+#ifdef PROFILE
+    t0 = MPI_Wtime();
+#endif
     SpTuples<IU,NUO> * C_tuples = MultiwayMerge<SR>(tomerge, C_m, C_n,false);
+#ifdef PROFILE
+    t1 = MPI_Wtime();
+    mergeTime += (t1 - t0);
+#endif
     UDERO * C = new UDERO(*C_tuples, false);
     delete C_tuples;
 
 	//if(!clearB)
 	//	const_cast< UDERB* >(B.spSeq)->Transpose();	// transpose back to original
+
+#ifdef PROFILE
+    timingsMap->emplace("bcast-A", std::to_string(bcastATime));
+    timingsMap->emplace("bcast-B", std::to_string(bcastBTime));
+    timingsMap->emplace("merge", std::to_string(mergeTime));
+    timingsMap->emplace("local-mult", std::to_string(localMultTime));
+#endif
 
 	return SpParMat<IU,NUO,UDERO> (C, GridC);		// return the result object
 }
