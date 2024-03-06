@@ -28,8 +28,12 @@ def bcast_model(mat_info: pd.Series) -> float:
 
     total_procs = ppn * nodes
 
-    nnz_estimate_A = mat_info['density-A'] * mat_info['m-A'] * mat_info['n-A']
-    nnz_estimate_B = mat_info['density-B'] * mat_info['m-B'] * mat_info['n-B']
+    def nnz_est_glob_density(mat_info):
+        nnz_estimate_A = mat_info['density-A'] * mat_info['m-A'] * mat_info['n-A']
+        nnz_estimate_B = mat_info['density-B'] * mat_info['m-B'] * mat_info['n-B']
+        return nnz_estimate_A, nnz_estimate_B 
+
+    nnz_estimate_A, nnz_estimate_B = nnz_est_glob_density(mat_info)
 
     bytes_A = nnz_estimate_A * 8 + nnz_estimate_A * 8 + mat_info['m-A'] * 8
     bytes_B = nnz_estimate_B * 8 + nnz_estimate_B * 8 + mat_info['m-B'] * 8
@@ -83,6 +87,7 @@ if __name__=="__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--infile", type=str)
     parser.add_argument("--plotname", type=str)
+    parser.add_argument("--phase", type=str)
     
     args = parser.parse_args()
 
@@ -90,9 +95,14 @@ if __name__=="__main__":
     df['trial'] = df.apply(lambda row: f"{row['A-name']}x{row['B-name']}", axis=1)
     df['bcast-time'] = df.apply(lambda row: row['bcast-A'] + row['bcast-B'], axis=1)
 
-    eval(args, df, bcast_model, 'bcast-time')
-    eval(args, df, mult_model, 'local-mult')
-    eval(args, df, merge_model, 'merge')
-    eval(args, df, model, 'total-time')
+    
+    if args.phase=="bcast":
+        eval(args, df, bcast_model, 'bcast-time')
+    elif args.phase=="mult":
+        eval(args, df, mult_model, 'local-mult')
+    elif args.phase=="merge":
+        eval(args, df, merge_model, 'merge')
+    elif args.phase=="all":
+        eval(args, df, model, 'total-time')
     
 
