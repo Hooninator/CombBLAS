@@ -65,8 +65,23 @@ void MakeSample2D(SpParMat<IT,NT,DER>& A, SpParMat<IT,NT,DER>& B, Map * timings,
     IT localFLOPS, globalFLOPS = 0;
     globalFLOPS = EstimateFLOP<PTTF, IT, NT, NT, DER, DER>(A, B, false, false, &localFLOPS);
 
+    float avgFLOPS, stdDevFLOPS = 0;
+    IT minFLOPS, maxFLOPS = 0;
+    
+    avgFLOPS = static_cast<float>(globalFLOPS) / static_cast<float>(A.getcommgrid()->GetSize());
+
+    MPI_Reduce((void*)(&localFLOPS), (void*)(&minFLOPS), 1, MPIType<IT>(), MPI_MIN, 0, A.getcommgrid()->GetWorld());
+    MPI_Reduce((void*)(&localFLOPS), (void*)(&maxFLOPS), 1, MPIType<IT>(), MPI_MAX, 0, A.getcommgrid()->GetWorld());
+    
+    stdDevFLOPS = std::pow( localFLOPS - avgFLOPS, 2 );
+    MPI_Allreduce(MPI_IN_PLACE, (void*)(&stdDevFLOPS), 1, MPI_FLOAT, MPI_SUM, A.getcommgrid()->GetWorld());
+    stdDevFLOPS = std::sqrt(stdDevFLOPS / static_cast<float>(A.getcommgrid()->GetSize())); 
+
     if (rank==0) {
-        featMap->emplace("local-FLOPS", STR(localFLOPS));
+        featMap->emplace("avg-FLOPS", STR(avgFLOPS));
+        featMap->emplace("min-FLOPS", STR(minFLOPS));
+        featMap->emplace("max-FLOPS", STR(maxFLOPS));
+        featMap->emplace("stdev-FLOPS", STR(stdDevFLOPS));
         featMap->emplace("global-FLOPS", STR(globalFLOPS));
         std::cout<<"Extracted FLOP stats..."<<std::endl;
     }
