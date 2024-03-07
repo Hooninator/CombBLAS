@@ -1932,13 +1932,13 @@ SpParMat<IU, NUO, UDERO> Mult_AnXBn_Synch
 			}
 			ARecv = new UDERA();				// first, create the object
 		}
-#ifdef PROFILE
+#ifdef TIMING
         t0 = MPI_Wtime();
 #endif
 		SpParHelper::BCastMatrix(GridC->GetRowWorld(), *ARecv, ess, i);	// then, receive its elements	
-#ifdef PROFILE
+#ifdef TIMING
         t1 = MPI_Wtime();
-        bcastAtime += (t1 - t0);
+        bcastATime += (t1 - t0);
 #endif
 		ess.clear();	
 		
@@ -1955,23 +1955,23 @@ SpParMat<IU, NUO, UDERO> Mult_AnXBn_Synch
 			}	
 			BRecv = new UDERB();
 		}
-#ifdef PROFILE
+#ifdef TIMING
         t0 = MPI_Wtime();
 #endif
 		SpParHelper::BCastMatrix(GridC->GetColWorld(), *BRecv, ess, i);	// then, receive its elements
-#ifdef PROFILE
+#ifdef TIMING
         t1 = MPI_Wtime();
-        bcastBtime += (t1 - t0);
+        bcastBTime += (t1 - t0);
 #endif
 
-#ifdef PROFILE
+#ifdef TIMING
         t0 = MPI_Wtime();
 #endif
 		SpTuples<IU,NUO> * C_cont = LocalHybridSpGEMM<SR, NUO>
 						(*ARecv, *BRecv, // parameters themselves
 						i != Aself, 	// 'delete A' condition
 						i != Bself);	// 'delete B' condition
-#ifdef PROFILE
+#ifdef TIMING
         t1 = MPI_Wtime();
         localMultTime += (t1 - t0);
 #endif
@@ -1999,11 +1999,11 @@ SpParMat<IU, NUO, UDERO> Mult_AnXBn_Synch
 	SpHelper::deallocate2D(ARecvSizes, UDERA::esscount);
 	SpHelper::deallocate2D(BRecvSizes, UDERB::esscount);
 
-#ifdef PROFILE
+#ifdef TIMING
     t0 = MPI_Wtime();
 #endif
     SpTuples<IU,NUO> * C_tuples = MultiwayMerge<SR>(tomerge, C_m, C_n,false);
-#ifdef PROFILE
+#ifdef TIMING
     t1 = MPI_Wtime();
     mergeTime += (t1 - t0);
 #endif
@@ -2013,7 +2013,7 @@ SpParMat<IU, NUO, UDERO> Mult_AnXBn_Synch
 	//if(!clearB)
 	//	const_cast< UDERB* >(B.spSeq)->Transpose();	// transpose back to original
 
-#ifdef PROFILE
+#ifdef TIMING
     timingsMap->emplace("bcast-A", std::to_string(bcastATime));
     timingsMap->emplace("bcast-B", std::to_string(bcastBTime));
     timingsMap->emplace("merge", std::to_string(mergeTime));
