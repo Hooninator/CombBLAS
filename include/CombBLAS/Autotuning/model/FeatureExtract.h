@@ -96,6 +96,59 @@ void MakeSample2D(SpParMat<IT,NT,DER>& A, SpParMat<IT,NT,DER>& B, Map * timings,
 
 }
 
+/* Features:
+ *     nnz-{A,B}
+ *     local FLOPS
+ *     m-{A,B}
+ *     n-{A,B}
+ *     outputNnz
+ * rank is just used to construct the graph
+ */
+
+void MakeSampleGNN(SpParMat<IT,NT,DER>& A, SpParMat<IT,NT,DER>& B, Map * timings, std::ofstream& ofs) {
+
+
+    int rank = A.getcommgrid()->GetRank();
+    
+    if (rank==0) ofs<<"----SAMPLE----"<<std::endl;
+    MPI_Barrier(MPI_COMM_WORLD);
+
+
+    Map * featMap = new Map();
+
+    featMap->emplace("rank", STR(rank));
+
+    featMap->emplace("nnz-A", STR(A.seqptr()->getnnz()));
+    featMap->emplace("nnz-B", STR(B.seqptr()->getnnz()));
+
+    typedef PlusTimesSRing<NT,NT> PTTF;
+    IT localFLOPS = 0;
+    EstimateFLOP<PTTF, IT, NT, NT, DER, DER>(A, B, false, false, &localFLOPS);
+    featMap->emplace("FLOPS", STR(localFLOPS));
+
+    featMap->emplace("m-A", STR(A.seqptr()->getnrow()));
+    featMap->emplace("m-B", STR(B.seqptr()->getnrow()));
+    featMap->emplace("n-A", STR(A.seqptr()->getncol()));
+    featMap->emplace("n-B", STR(B.seqptr()->getncol()));
+
+    IT * flopC = estimateFLOP(*(A.seqptr()), *(B.seqptr()));
+    
+    IT outputNnz = 0;
+    if (!(A.seqptr()->isZero()) && !(B.seqptr()->isZero())) {
+        IT * outputNnzCol = estimateNNZ_Hash(*(A.seqptr()), *(B.seqptr()), flopC);
+        for (int i=0; i<B.seqptr()->GetDCSC()->nzc; i++)
+        {
+            outputNnz += outputNnzCol[i];
+        }
+    }
+
+    featMap->emplace("outputNnz", STR(outputNnz));
+
+    WriteSample(featMap, timings, ofs);
+    std::cout<<"Wrote sample!"<<std::endl;
+
+    MPI_Barrier(MPI_COMM_WORLD);
+}
 
 void WriteSample(const Map * features, const Map * timings, std::ofstream& ofs) {
 

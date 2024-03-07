@@ -134,8 +134,7 @@ void runSpGEMM2Dcpu(int argc, char ** argv) {
 
     /* Feature extraction */
     std::ofstream sampleFile;
-    if (rank==0)
-        sampleFile.open("samples.txt", std::ofstream::app);
+    sampleFile.open(std::string("samples-gnn-")+std::getenv("SLURM_NNODES")+std::string(".txt"), std::ofstream::app);
     FeatureExtractor<IT,NT,DER> extractor;
     std::map<std::string, std::string> * timingsMap = new std::map<std::string,std::string>();
     
@@ -212,7 +211,8 @@ void runSpGEMM2Dcpu(int argc, char ** argv) {
     
         /* Feature extraction only for i>0 */
         if (i>0)
-            extractor.MakeSample2D(A, B, timingsMap, sampleFile);
+            extractor.MakeSampleGNN(A, B, timingsMap, sampleFile);
+            //extractor.MakeSample2D(A, B, timingsMap, sampleFile);
         timingsMap->clear();
     } 
 
