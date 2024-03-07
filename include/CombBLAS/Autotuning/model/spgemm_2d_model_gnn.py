@@ -27,7 +27,8 @@ features = [
             "n-B",
             "nnz-A",
             "nnz-B",
-            "outputNnz"
+            "outputNnz-intermediate",
+            "outputNnz-final"
             ]
 n_features = len(features)
 

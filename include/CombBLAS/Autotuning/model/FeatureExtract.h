@@ -144,7 +144,7 @@ void MakeSampleGNN(SpParMat<IT,NT,DER>& A, SpParMat<IT,NT,DER>& B, Map * timings
     }
     featMap->emplace("outputNnz-intermediate", STR(outputNnz));
 
-    IT outputNnzFinal = EstPerProcessNnzSUMMA(A,B, true);
+    int64_t outputNnzFinal = EstPerProcessNnzSUMMAMax(A,B, false);
     featMap->emplace("outputNnz-final", STR(outputNnzFinal));
 
     WriteSample(featMap, timings, ofs);
