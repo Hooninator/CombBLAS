@@ -98,10 +98,11 @@ void MakeSample2D(SpParMat<IT,NT,DER>& A, SpParMat<IT,NT,DER>& B, Map * timings,
 
 /* Features:
  *     nnz-{A,B}
- *     local FLOPS
+ *     FLOPS
  *     m-{A,B}
  *     n-{A,B}
- *     outputNnz
+ *     outputNnz-intermediate
+ *     outputNnz-final
  * rank is just used to construct the graph
  */
 
@@ -141,8 +142,10 @@ void MakeSampleGNN(SpParMat<IT,NT,DER>& A, SpParMat<IT,NT,DER>& B, Map * timings
             outputNnz += outputNnzCol[i];
         }
     }
+    featMap->emplace("outputNnz-intermediate", STR(outputNnz));
 
-    featMap->emplace("outputNnz", STR(outputNnz));
+    IT outputNnzFinal = EstPerProcessNnzSUMMA(A,B, true);
+    featMap->emplace("outputNnz-final", STR(outputNnzFinal));
 
     WriteSample(featMap, timings, ofs);
     std::cout<<"Wrote sample!"<<std::endl;
@@ -178,6 +181,8 @@ std::string ToStrScientific(T input) {
     ss<<std::scientific<<std::setprecision(PRECISION)<<input;
     return ss.str();
 }
+
+
 
 
 void JobStats(Map * featMap) {
