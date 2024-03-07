@@ -30,7 +30,7 @@ n_features = len(features)
 
 def make_graphs(args, f_prefix="samples-gnn"):
 
-    df_list = []
+    graph_list = []
     file_names = list(filter(lambda s: f_prefix in s, os.listdir(path_prefix)))
     bad_samples = 0
 
@@ -53,9 +53,12 @@ def make_graphs(args, f_prefix="samples-gnn"):
                             bad_samples+=1
                             ill_formed = False
                         else:
-                            data = Data(x=torch.tensor(x), edge_index = grid(int(math.sqrt(x.shape[0])), int(math.sqrt(x.shape[0]))), 
+                            (rows,cols),pos = grid(int(math.sqrt(x.shape[0])), int(math.sqrt(x.shape[0])))
+                            edge_index = torch.stack((rows, cols))
+                            data = Data(x=torch.tensor(x), edge_index = edge_index, pos=pos, 
                                         y=torch.tensor(y))
-                            df_list.append(data)
+                            data.validate(raise_on_error=True)
+                            graph_list.append(data)
                     
                     x = np.zeros(shape=(0, n_features+1)) #One more for rank
                     y = np.zeros(shape=(0,1))
@@ -81,27 +84,26 @@ def make_graphs(args, f_prefix="samples-gnn"):
                         ill_formed = True
 
             # Add last sample
-            data = Data(x=torch.tensor(x), edge_index = grid(int(math.sqrt(x.shape[0])), int(math.sqrt(x.shape[0]))), 
+            (rows,cols),pos = grid(int(math.sqrt(x.shape[0])), int(math.sqrt(x.shape[0])))
+            edge_index = torch.stack((rows, cols))
+            data = Data(x=torch.tensor(x), edge_index = edge_index, pos=pos, 
                         y=torch.tensor(y))
-            df_list.append(data)
+            data.validate(raise_on_error=True)
+            graph_list.append(data)
     
     etime = time.time()
-    print(f"Processsed {len(df_list)} graphs in {etime-stime}s")
+    print(f"Processsed {len(graph_list)} graphs in {etime-stime}s")
     print(f"There were {bad_samples} ill-formed graphs")
 
-    return df_list 
+    return graph_list 
 
 
-                    
-
-
-
-def train(graph):
+def train(train_graphs):
 
     return
 
 
-def eval(model, graph):
+def eval(model, test_graphs):
     
     return
 
@@ -116,5 +118,19 @@ if __name__=="__main__":
     args = parser.parse_args()
     
     graphs = make_graphs(args)
+
+    random.shuffle(graphs)
+
+    n_samples = len(graphs)
+    test_size = int(0.10*n_samples)
+    test_graphs, train_graphs = graphs[0:test_size], graphs[test_size:]
+
+    model = train(train_graphs)
+
+
+
+
+
+
 
 
