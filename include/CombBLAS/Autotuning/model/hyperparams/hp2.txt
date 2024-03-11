@@ -1,0 +1,5 @@
+alpha:0.01
+batch_size:32
+hidden_size1:256
+hidden_size2:128
+embedding_size:16

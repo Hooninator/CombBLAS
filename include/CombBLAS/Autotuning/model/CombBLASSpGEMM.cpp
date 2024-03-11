@@ -59,6 +59,13 @@ int64_t mcl_nnzc_prev;
 
 using namespace combblas;
 
+std::string ExtractMatName(const std::string& path) {
+    size_t start = path.rfind('/') + 1; // +1 to start after '/'
+    size_t end = path.rfind('.');
+    std::string fileName = path.substr(start, end - start);
+    return fileName;
+}
+
 
 void runSpGEMM1Dcpu(int argc, char ** argv) {
     //TODO
@@ -131,10 +138,20 @@ void runSpGEMM2Dcpu(int argc, char ** argv) {
     
     double totalTime=0.0;
     int64_t perProcessMem = (512) / np; //Perlmutter CPU node
+    
+    std::string matA = ExtractMatName(matNameA);
+    std::string matB = ExtractMatName(matNameB);
 
     /* Feature extraction */
     std::ofstream sampleFile;
-    sampleFile.open(std::string("samples-gnn-")+std::getenv("SLURM_NNODES")+std::string(".txt"), std::ofstream::app);
+    if (!std::string(argv[7]).compare("gnn")) { 
+        sampleFile.open(std::string("samples-gnn-")+std::getenv("SLURM_NNODES")+matA+matB+std::string(".txt"), std::ofstream::app);
+    } else if (!std::string(argv[7]).compare("xgb")) {
+        sampleFile.open(std::string("samples-xgb-")+std::getenv("SLURM_NNODES")+matA+matB+std::string(".txt"), std::ofstream::app);
+    } else {
+        std::cout<<"file argument wrong: "<<argv[7]<<std::endl;
+        exit(1);
+    }
     FeatureExtractor<IT,NT,DER> extractor;
     std::map<std::string, std::string> * timingsMap = new std::map<std::string,std::string>();
     
@@ -210,9 +227,14 @@ void runSpGEMM2Dcpu(int argc, char ** argv) {
         }
     
         /* Feature extraction only for i>0 */
-        if (i>0)
-            extractor.MakeSampleGNN(A, B, timingsMap, sampleFile);
-            //extractor.MakeSample2D(A, B, timingsMap, sampleFile);
+        if (i>0) {
+            if (!std::string(argv[7]).compare("gnn"))
+                extractor.MakeSampleGNN(A, B, timingsMap, sampleFile);
+            else if (!std::string(argv[7]).compare("xgb"))
+                extractor.MakeSample2D(A, B, timingsMap, sampleFile);
+            else
+                exit(1);
+        }
         timingsMap->clear();
     } 
 
@@ -349,7 +371,7 @@ void runSpGEMM3Dcpu(int argc, char ** argv) {
 
 int main(int argc, char ** argv) {
     
-    /* ./binary <ALG-TYPE> <MAT-NAME-A> <MAT-NAME-B> <ALG-CODE> <LAYERS> <PERMUTE-B>*/
+    /* ./binary <ALG-TYPE> <MAT-NAME-A> <MAT-NAME-B> <ALG-CODE> <LAYERS> <PERMUTE-B> <MODEL>*/
 
     assert(argc>6);
     
