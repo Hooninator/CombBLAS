@@ -2,6 +2,11 @@ from collections import defaultdict
 
 import pandas as pd
 
+import os
+import time
+
+path_prefix="/global/homes/j/jbellav/CombBLAS/include/CombBLAS/Autotuning/model/"
+
 
 def load_spgemm2d_data(filename="samples.txt"):
     
@@ -47,9 +52,41 @@ def load_spgemm2d_data(filename="samples.txt"):
     return df
 
 
+def load_gnn_df(features, labels, f_prefix="samples-gnn-mod"):
+    
+    graph_list = []
+    
+    file_names = list(filter(lambda s: f_prefix in s, os.listdir(path_prefix)))
+    
+    df_dict = defaultdict(lambda: [])
 
-def get_problem_feature(df, matnameA, matnameB, feature):
-    
-    
-    
-    return
+    stime = time.time()
+    for fname in file_names:
+        print(f"Processing {fname}...")
+        with open(path_prefix+fname, 'r') as file:
+            for line in file:
+                if "SAMPLE" in line:
+                    continue
+                feats = line.split(" ")
+                found_feats = []
+                for f in feats:
+                    name, val = f.split(":")[0], f.split(":")[1]
+                    name = name.strip()
+                    if "problem" in name:
+                        df_dict[name].append(val)
+                        found_feats.append(name)
+                    elif name in features+labels and name not in found_feats:
+                        try:
+                            df_dict[name].append(float(val))
+                            found_feats.append(name)
+                        except:
+                            continue
+                for f in features+labels+["problem"]:
+                    if f not in found_feats:
+                        df_dict[f].append(None)
+    etime = time.time()
+    df = pd.DataFrame(df_dict)
+    print(f"Processsed {len(df)} samples in {etime-stime}s")
+
+    df["bcast"] = df["bcast-A"] + df["bcast-B"]
+    return df 
