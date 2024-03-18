@@ -56,6 +56,11 @@ public:
         return static_cast<MT*>(this)->MakeFeatureMatImpl(inputs,searchSpace);
     }
 
+    template <typename I>
+    std::vector<float> MakeFeatureMat(I& inputs, SpGEMMParams& params) {
+        return static_cast<MT*>(this)->MakeFeatureMatImpl(inputs,params);
+    }
+
     //TODO: replace this with somethine non-embarrassing 
 #ifdef PROFILE
     void WritePrediction(std::vector<SpGEMMParams>& searchSpace, std::vector<float>& predictions) {
@@ -919,16 +924,129 @@ public:
     template <typename IT, typename NT, typename DER>
     class SpParMatInfoPhase : public SpParMatInfo<IT,NT,DER> {
     public:
+        
+        using SpParMatInfo<IT,NT,DER>::locNnz;
+        using SpParMatInfo<IT,NT,DER>::locNrowsExact;
+        using SpParMatInfo<IT,NT,DER>::locNcolsExact;
 
+        SpParMatInfoPhase(SpParMat<IT,NT,DER>& Mat)
+        {
+            
+        }
+
+    };
+
+
+    //TODO: One day, this will all need a semiring template parameter
+    template <typename AIT, typename ANT, typename ADER, typename BIT, typename BNT, typename BDER>
+    class Inputs : public SpGEMM2DInputs<AIT,ANT,ADER,BIT,BNT,BDER> {
+    public:
+        
+        typedef PlusTimesSRing<ANT,BNT> PTTF;
+
+        Inputs(SpParMat<AIT,ANT,ADER>& A, SpParMat<BIT,BNT,BDER>& B):
+            Ainfo(A), Binfo(B), FLOPS(0), outputNnzIntermediate(0), outputNnzFinal(0)
+        {
+#ifdef PROFILE
+            infoPtr->StartTimerGlobal("FLOPEstimation");
+#endif
+            EstimateFLOP<PTTF, AIT, ANT, BNT, ADER, BDER>(A,B,false,false,&FLOPS);
+#ifdef PROFILE
+            infoPtr->EndTimerGlobal("FLOPEstimation");
+#endif
+
+#ifdef PROFILE
+            infoPtr->StartTimerGlobal("NnzIntermediate");
+#endif
+			AIT * flopC = estimateFLOP(*(A.seqptr()), *(B.seqptr())); 
+ 
+			if (!(A.seqptr()->isZero()) && !(B.seqptr()->isZero())) {
+                AIT * outputNnzCol = estimateNNZ_Hash(*(A.seqptr()), *(B.seqptr()), flopC);
+				for (int i=0; i<B.seqptr()->GetDCSC()->nzc; i++)
+				{
+					outputNnzIntermediate += outputNnzCol[i];
+				}
+			}
+            
+#ifdef PROFILE
+            infoPtr->EndTimerGlobal("NnzIntermediate");
+#endif
+
+#ifdef PROFILE
+            infoPtr->StartTimerGlobal("NnzFinal");
+#endif
+            outputNnzFinal = EstPerProcessNnzSUMMAMax(A,B,false);
+#ifdef PROFILE
+            infoPtr->EndTimerGlobal("NnzFinal");
+#endif
+        
+        }
     private:
+        SpParMatInfoPhase<AIT,ANT,ADER> Ainfo;
+        SpParMatInfoPhase<BIT,BNT,BDER> Binfo;
+        
+        AIT FLOPS;
+        AIT outputNnzIntermediate;
+        AIT outputNnzFinal;
+
     };
 
 
     template <typename AIT, typename ANT, typename ADER, typename BIT, typename BNT, typename BDER>
-    class Inputs : public SpGEMM2DInputs<AIT,ANT,ADER,BIT,BNT,BDER> {
-    public:
-    private:
-    };
+    std::vector<float> PredictImpl(Inputs<AIT,ANT,ADER,BIT,BNT,BDER>& inputs,
+                                    std::vector<SpGEMMParams>& searchSpace) {
+
+        std::vector<float> times;
+        times.reserve(searchSpace.size());
+
+        std::transform(searchSpace.begin(), searchSpace.end(), times.begin(), times.end(),
+            [&inputs](auto& params) {
+                auto featureMat = MakeFeatureMatImpl(inputs, params);
+                float bcastTime = BcastTime(featureMat, params);
+                float localSpGEMMTime = LocalSpGEMMTime(featureMat, params);
+                float mergeTime = MergeTime(featureMat, params);
+                return bcastTime + localSpGEMMTime + mergeTime;
+            }
+        );
+
+    }
+
+
+    template <typename AIT, typename ANT, typename ADER, typename BIT, typename BNT, typename BDER>
+    std::vector<float> MakeFeatureMatImpl(Inputs<AIT,ANT,ADER, BIT,BNT,BDER>& inputs,
+                                            SpGEMMParams& params) {
+
+        std::vector<std::string> features{
+            "FLOPS",
+            "m-A",
+            "m-B",
+            "n-A",
+            "n-B",
+            "nnz-A",
+            "nnz-B",
+            "outputNnz-intermediate",
+            "outputNnz-final",
+            "Nodes",
+            "PPN",
+            "rank"
+        };
+        
+
+
+    }
+
+    
+    float BcastTime(std::vector<float>& X, SpGEMMParams& params) {
+    }
+
+    
+    float LocalSpGEMMTime( std::vector<float>& X, SpGEMMParams& params) {
+    }
+
+
+    float MergeTime(std::vector<float>& X, SpGEMMParams& params) {
+    }
+
 
 private:
     int nFeatures; // same number of features for both models

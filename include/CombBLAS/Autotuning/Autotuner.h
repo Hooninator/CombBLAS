@@ -130,7 +130,7 @@ public:
         SpGEMM2DModelPhase::Inputs<AIT,ANT,ADER,BIT,BNT,BDER> inputs(A, B);
         
         SpGEMMParams resultParams; 
-        resultParams = SearchInference<SpGEMMParams>(inputs, model);
+        resultParams = SearchBruteForce<SpGEMMParams>(inputs, model);
 
 #ifdef PROFILE
         infoPtr->EndTimerGlobal("TuneSpGEMM2DPhase");
