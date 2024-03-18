@@ -7,10 +7,10 @@ import argparse
 import statistics as stats
 import os
 import time
-import argparse
 import random
 import math
 import json
+import pickle
 
 from collections import defaultdict
 from dataclasses import dataclass
@@ -248,8 +248,8 @@ def split(df, size):
     problems = df['problem'].unique()
     s = int(len(problems)*size)
 
-    random.shuffle(problems)
-    print(len(problems))
+    #random.shuffle(problems)
+    #print(len(problems))
 
     test_problems, train_problems = problems[:s],problems[s:]
     
@@ -288,49 +288,52 @@ def bcast_model(X):
         beta = ((2*(grid_dim-1))/grid_dim)*(msg_size/perlmutter_params.inter_beta)
         return (alpha+beta)/1e6
 
+    def bcast_regression(nodes, ppn, msg_size):
+        if math.isnan(msg_size):
+            return 0
+        with open("./bcast-bench/bcast-model.pkl", 'rb') as file:
+            model = pickle.load(file)
+            return model.predict(pd.DataFrame({"nodes":[nodes], "ppn":[ppn], "msg_size":[msg_size]}))[0]/(1e6)
+
+
     grid_dim = int(math.sqrt(X.shape[0]))
 
-    bytes_mat = np.zeros(shape=(grid_dim, grid_dim))
     times_mat = np.zeros(shape=(grid_dim, grid_dim))
 
     # Populate bytes
-    for _, x in X.iterrows():
-
-        rank = int(x["rank"])
-
-        nnz_A, nnz_B = x["nnz-A"], x["nnz-B"] 
-
-        bytes_A = nnz_A * 8 + nnz_A * 8 + x['m-A'] * 8
-        bytes_B = nnz_B * 8 + nnz_B * 8 + x['m-B'] * 8
-        
-        row_rank = rank % grid_dim
-        col_rank = rank // grid_dim
-
-        bytes_mat[row_rank, col_rank] = bytes_A + bytes_B
-
-    row_bytes = np.sum(bytes_mat, axis=1) # Storage for all submatrices in each prow
-    col_bytes = np.sum(bytes_mat, axis=0) # || but for each pcol
-
-    # Now, compute bcast times
     for _, x in X.iterrows():
 
         ppn = x["PPN"]
         nodes = x["Nodes"]
         rank = int(x["rank"])
 
-        # Reduce across rank's prow and pcol
+        nnz_A, nnz_B = x["nnz-A"], x["nnz-B"] 
+        density_A = nnz_A/(x['n-A']*x['m-A'])
+        density_B = nnz_B/(x['n-B']*x['m-B'])
+
+        bytes_A = nnz_A * 8 + nnz_A * 8 +  nnz_A * 8
+        bytes_B = nnz_B * 8 + nnz_B * 8 + nnz_B * 8
+        
         row_rank = rank % grid_dim
         col_rank = rank // grid_dim
-        
-        total_bytes = row_bytes[row_rank] + col_bytes[col_rank]
+
+        total_bytes = bytes_A + bytes_B
 
         # Decide which bcast algorithm to use based on msg size
-        if total_bytes < 1e8 or True:
-            bcast_time = bcast_tree(grid_dim, total_bytes)
-        else:
-            bcast_time = bcast_ring(grid_dim, total_bytes)
+        #if total_bytes < 1e8 or True:
+        bcast_time = bcast_tree(grid_dim, total_bytes)
+        #else:
+        #    bcast_time = bcast_ring(grid_dim, total_bytes)
+        #bcast_time = bcast_regression(nodes, ppn, total_bytes)
         
         times_mat[row_rank, col_rank] = bcast_time
+
+    row_times = np.sum(times_mat, axis=1)
+    col_times = np.sum(times_mat, axis=0)
+
+    for i in range(times_mat.shape[0]):
+        for j in range(times_mat.shape[1]):
+            times_mat[i,j] = row_times[i] + col_times[j]
 
     return times_mat.flatten()
 
@@ -341,6 +344,9 @@ def spgemm_model(X):
         bcast_pred = np.append(bcast_pred, (bcast_model(x)))
     mult_pred = loc_mult_model(X, True)
     merge_pred = merge_model(X, True)
+    
+    #bcast_pred = np.zeros(shape=(X.shape[0]))
+
     return bcast_pred + mult_pred + merge_pred
 
 
@@ -376,13 +382,14 @@ if __name__=="__main__":
             df_problem = df[df['problem']==p]
             for _, d in df_problem.groupby(by=["Nodes", "PPN"]):
                 if not math.sqrt(d.shape[0]).is_integer():
-                    df.drop(labels=d.index)
+                    df = df.drop(labels=d.index)
             
 
         df.to_pickle("./master-df-gnn.pkl")
     else:
         df = pd.read_pickle("./master-df-gnn.pkl")
     
+    df["no-bcast"] = df["local-mult"] + df["merge"]
     
     test_data, train_data = split(df, 0.1)
     
