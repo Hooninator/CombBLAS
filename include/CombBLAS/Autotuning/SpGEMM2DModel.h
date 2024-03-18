@@ -919,6 +919,21 @@ public:
 
         XGB_CHECK(XGBoosterGetNumFeature(multBstHandle, (bst_ulong*)(&nFeatures)));
 
+        std::vector<std::string> features{
+            "FLOPS",
+            "m-A",
+            "m-B",
+            "n-A",
+            "n-B",
+            "nnz-A",
+            "nnz-B",
+            "outputNnz-intermediate",
+            "outputNnz-final",
+            "Nodes",
+            "PPN",
+        };
+
+        ASSERT(nFeatures==features.size(), "Feature size is wrong");
     }
     
     template <typename IT, typename NT, typename DER>
@@ -1072,22 +1087,6 @@ public:
         auto Ainfo = inputs.Ainfo;
         auto Binfo = inputs.Binfo;
 
-        std::vector<std::string> features{
-            "FLOPS",
-            "m-A",
-            "m-B",
-            "n-A",
-            "n-B",
-            "nnz-A",
-            "nnz-B",
-            "outputNnz-intermediate",
-            "outputNnz-final",
-            "Nodes",
-            "PPN",
-        };
-
-        ASSERT(nFeatures==features.size(), "Feature size is wrong");
-
         std::vector<float> featureMat(nFeatures*params.GetTotalProcs());
 
         // For now, assume always scaling down
@@ -1142,7 +1141,8 @@ public:
         
         std::vector<int> topLeftRanks(Ainfo.worldSize / (superTileDim*superTileDim));
         for (int i=0; i<topLeftRanks.size(); i++) {
-            topLeftRanks[i] = ((i*superTileDim) % gridDim) + ((i / gridDim) * (gridDim * superTileDim * superTileDim));
+            topLeftRanks[i] = ((i*superTileDim)%RoundedSqrt<int,int>(Ainfo.worldSize)) 
+                            + ((i / gridDim) * (gridDim * superTileDim * superTileDim));
         }
 
         MPI_Group topLeftGroup;
