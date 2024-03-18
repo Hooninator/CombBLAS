@@ -108,6 +108,43 @@ public:
     }
 
 
+    //TODO: This should probably just be a tuneinference function with a template parameter
+    template <typename AIT, typename ANT, typename ADER, typename BIT, typename BNT, typename BDER>
+    SpGEMMParams TuneSpGEMM2DPhase(SpParMat<AIT, ANT, ADER>& A, SpParMat<BIT, BNT, BDER>& B, 
+                                    std::string& matpathA, std::string& matpathB){
+
+#ifdef PROFILE
+        std::string matnameA = ExtractMatName(matpathA);
+        std::string matnameB = ExtractMatName(matpathA);
+        infoPtr = new InfoLog("info-"+matnameA+"x"+matnameB+".out", autotuning::rank);
+#endif
+
+#ifdef PROFILE
+        infoPtr->StartTimerGlobal("TuneSpGEMM2DPhase");
+#endif
+
+        typedef SpGEMM2DModel<SpGEMM2DModelPhase> ModelType;
+        ModelType model;
+        model.Create(platformParams);
+        
+        SpGEMM2DModelPhase::Inputs<AIT,ANT,ADER,BIT,BNT,BDER> inputs(A, B);
+        
+        SpGEMMParams resultParams; 
+        resultParams = SearchInference<SpGEMMParams>(inputs, model);
+
+#ifdef PROFILE
+        infoPtr->EndTimerGlobal("TuneSpGEMM2DPhase");
+        infoPtr->PrintGlobal("TuneSpGEMM2DPhase");
+#endif
+
+#ifdef PROFILE
+        infoPtr->WriteInfoGlobal();
+        delete infoPtr;
+#endif
+
+        return resultParams;
+
+    }
     
     template <typename P, typename M, typename I>
     P SearchBruteForce(I& inputs, M& model) {

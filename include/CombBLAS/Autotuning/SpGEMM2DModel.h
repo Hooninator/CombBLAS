@@ -896,6 +896,47 @@ private:
 
 };
 
+
+class SpGEMM2DModelPhase : public SpGEMM2DModel<SpGEMM2DModelPhase> {
+
+public:
+
+    void CreateImpl() {
+        XGB_CHECK(XGBoosterCreate(nullptr, 0, &multBstHandle));
+        XGB_CHECK(XGBoosterCreate(nullptr, 0, &mergeBstHandle));
+
+        //TODO: Remove hardocded filepaths
+        const char * multModelPath = "../include/CombBLAS/Autotuning/model/models/xgb-mult.model";
+        const char * mergeModelPath = "../include/CombBLAS/Autotuning/model/models/xgb-merge.model";
+        
+        XGB_CHECK(XGBoosterLoadModel(multBstHandle, multModelPath));
+        XGB_CHECK(XGBoosterLoadModel(mergeBstHandle, mergeModelPath));
+
+        XGB_CHECK(XGBoosterGetNumFeature(multBstHandle, (bst_ulong*)(&nFeatures)));
+
+    }
+    
+    template <typename IT, typename NT, typename DER>
+    class SpParMatInfoPhase : public SpParMatInfo<IT,NT,DER> {
+    public:
+
+    private:
+    };
+
+
+    template <typename AIT, typename ANT, typename ADER, typename BIT, typename BNT, typename BDER>
+    class Inputs : public SpGEMM2DInputs<AIT,ANT,ADER,BIT,BNT,BDER> {
+    public:
+    private:
+    };
+
+private:
+    int nFeatures; // same number of features for both models
+    BoosterHandle multBstHandle;
+    BoosterHandle mergeBstHandle;
+
+};
+
 #endif
 
 
