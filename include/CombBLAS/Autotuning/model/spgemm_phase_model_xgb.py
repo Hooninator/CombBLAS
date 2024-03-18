@@ -140,6 +140,7 @@ class ProblemPhaseResults:
         err_arr = self.get_stat_arr("top1err")
         
         print(f"----AVERAGE KT: {sum(kt_arr)/len(kt_arr)}")
+        print(f"----MEDIAN KT: {stats.median(kt_arr)}")
         
         kt_sorted_results = sorted(self.results.values(), key=lambda r:r.kt)
         print(f"----Problems with the 10 worst KT are: ")
@@ -155,6 +156,7 @@ class ProblemPhaseResults:
         print(f"----NUMBER CORRECT : {sum(correct_arr)}/{len(correct_arr)}")
         print(f"----TOTAL TOP 1 ERROR: {sum(err_arr)}")
         print(f"----AVERAGE TOP 1 ERROR: {sum(err_arr)/len(err_arr)}")
+        print(f"----MEDIAN TOP 1 ERROR: {stats.median(err_arr)}")
     
 
 def eval_phase(args, test_df, model, bulk=True):
