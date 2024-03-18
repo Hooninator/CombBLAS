@@ -44,9 +44,9 @@ public:
     }
 
     template <typename T>
-    void LogVecSameLine(std::vector<T>& v, std::string prefix=NULL) {
+    void LogVecSameLine(std::vector<T>& v, std::string prefix="") {
         if (rank==0||_allRanks) {
-            this->ofs<<prefix;
+            this->ofs<<prefix<<":";
             std::for_each(v.begin(), v.end(), [this](T& elem) {this->ofs<<elem<<" ";});
             this->ofs<<std::endl;
         }

@@ -57,7 +57,8 @@ public:
         locNrowsExact(Mat.seqptr()->getnrow()),
 
         rowRank(Mat.getcommgrid()->GetRankInProcRow()),
-        colRank(Mat.getcommgrid()->GetRankInProcCol())
+        colRank(Mat.getcommgrid()->GetRankInProcCol()),
+        rank(Mat.getcommgrid()->GetRank())
     {
         SetGlobalInfo(Mat);
     }
@@ -178,7 +179,8 @@ protected:
     IT locNcolsExact;
     IT locNrowsExact;
     int rowRank; //rank in actual 2d grid
-    int colRank; //^^
+    int colRank; // ||
+    int rank;    // ||
     DER * locMat;
 
     // Row or column split

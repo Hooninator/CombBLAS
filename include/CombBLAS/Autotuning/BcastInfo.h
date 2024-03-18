@@ -127,7 +127,7 @@ BcastAlgorithm SelectBcastAlg(IT msgSize, int commSize) {
 template <typename IT>
 CommInfo<IT> * MakeBcastCommInfo(const int bcastWorldSize,  const IT msgSize) {
 
-	BcastAlgorithm alg = SelectBcastAlgSimple(msgSize, bcastWorldSize);
+	BcastAlgorithm alg = SelectBcastAlgTree(msgSize, bcastWorldSize);
 	//BcastAlgorithm alg = SelectBcastAlgTree();
 
 	CommInfo<IT> * info = new CommInfo<IT>();

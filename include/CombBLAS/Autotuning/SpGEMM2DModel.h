@@ -928,11 +928,21 @@ public:
         using SpParMatInfo<IT,NT,DER>::locNnz;
         using SpParMatInfo<IT,NT,DER>::locNrowsExact;
         using SpParMatInfo<IT,NT,DER>::locNcolsExact;
+        using SpParMatInfo<IT,NT,DER>::rank;
+        using SpParMatInfo<IT,NT,DER>::colRank;
+        using SpParMatInfo<IT,NT,DER>::rowRank;
+        using SpParMatInfo<IT,NT,DER>::ncols;
+        using SpParMatInfo<IT,NT,DER>::nrows;
 
-        SpParMatInfoPhase(SpParMat<IT,NT,DER>& Mat)
+        SpParMatInfoPhase(SpParMat<IT,NT,DER>& Mat):
+            SpParMatInfo<IT,NT,DER>(Mat)
         {
-            
+            gridComm = Mat.getcommgrid()->GetWorld();
+            worldSize = Mat.getcommgrid()->GetSize();
         }
+
+        MPI_Comm gridComm;
+        int worldSize;
 
     };
 
@@ -947,12 +957,27 @@ public:
         Inputs(SpParMat<AIT,ANT,ADER>& A, SpParMat<BIT,BNT,BDER>& B):
             Ainfo(A), Binfo(B), FLOPS(0), outputNnzIntermediate(0), outputNnzFinal(0)
         {
+
+#ifdef DEBUG
+            debugPtr->Print0("Starting info construction");
+#endif
+
 #ifdef PROFILE
             infoPtr->StartTimerGlobal("FLOPEstimation");
 #endif
+
+#ifdef DEBUG
+            debugPtr->Print0("Starting FLOP estimation");
+#endif
+
             EstimateFLOP<PTTF, AIT, ANT, BNT, ADER, BDER>(A,B,false,false,&FLOPS);
+
 #ifdef PROFILE
             infoPtr->EndTimerGlobal("FLOPEstimation");
+#endif
+
+#ifdef DEBUG
+            debugPtr->Print0("FLOP estimation complete");
 #endif
 
 #ifdef PROFILE
@@ -967,6 +992,10 @@ public:
 					outputNnzIntermediate += outputNnzCol[i];
 				}
 			}
+
+#ifdef DEBUG
+            debugPtr->Print0("First output nnz estimation complete");
+#endif
             
 #ifdef PROFILE
             infoPtr->EndTimerGlobal("NnzIntermediate");
@@ -976,12 +1005,17 @@ public:
             infoPtr->StartTimerGlobal("NnzFinal");
 #endif
             outputNnzFinal = EstPerProcessNnzSUMMAMax(A,B,false);
+
+#ifdef DEBUG
+            debugPtr->Print0("Second output nnz estimation complete");
+#endif
+
 #ifdef PROFILE
             infoPtr->EndTimerGlobal("NnzFinal");
 #endif
         
         }
-    private:
+
         SpParMatInfoPhase<AIT,ANT,ADER> Ainfo;
         SpParMatInfoPhase<BIT,BNT,BDER> Binfo;
         
@@ -996,18 +1030,29 @@ public:
     std::vector<float> PredictImpl(Inputs<AIT,ANT,ADER,BIT,BNT,BDER>& inputs,
                                     std::vector<SpGEMMParams>& searchSpace) {
 
-        std::vector<float> times;
-        times.reserve(searchSpace.size());
+#ifdef DEBUG
+        debugPtr->Print0("Beginning prediction");
+#endif
 
-        std::transform(searchSpace.begin(), searchSpace.end(), times.begin(), times.end(),
-            [&inputs](auto& params) {
-                auto featureMat = MakeFeatureMatImpl(inputs, params);
-                float bcastTime = BcastTime(featureMat, params);
-                float localSpGEMMTime = LocalSpGEMMTime(featureMat, params);
-                float mergeTime = MergeTime(featureMat, params);
+        std::vector<float> times(searchSpace.size());
+
+        std::transform(searchSpace.begin(), searchSpace.end(), times.begin(),
+            [&inputs, this](auto& params) {
+
+                auto featureMat = this->MakeFeatureMatImpl(inputs, params);
+
+                float bcastTime = this->BcastTime(featureMat, params);
+                float localSpGEMMTime = this->LocalSpGEMMTime(featureMat, params);
+                float mergeTime = this->MergeTime(featureMat, params);
                 return bcastTime + localSpGEMMTime + mergeTime;
             }
         );
+
+#ifdef DEBUG
+        debugPtr->Print0("Ended prediction");
+#endif
+
+        return times;
 
     }
 
@@ -1015,6 +1060,17 @@ public:
     template <typename AIT, typename ANT, typename ADER, typename BIT, typename BNT, typename BDER>
     std::vector<float> MakeFeatureMatImpl(Inputs<AIT,ANT,ADER, BIT,BNT,BDER>& inputs,
                                             SpGEMMParams& params) {
+
+#ifdef DEBUG
+        debugPtr->Print0(params.OutStr());
+#endif
+
+#ifdef PROFILE
+        infoPtr->StartTimer("FeatureCollection");
+#endif
+
+        auto Ainfo = inputs.Ainfo;
+        auto Binfo = inputs.Binfo;
 
         std::vector<std::string> features{
             "FLOPS",
@@ -1028,10 +1084,87 @@ public:
             "outputNnz-final",
             "Nodes",
             "PPN",
-            "rank"
         };
-        
 
+        ASSERT(nFeatures==features.size(), "Feature size is wrong");
+
+        std::vector<float> featureMat(nFeatures*params.GetTotalProcs());
+
+        // For now, assume always scaling down
+        ASSERT(jobPtr->totalTasks>=params.GetTotalProcs(), "Scaling up is not yet supported");
+
+        int gridDim = params.GetGridDim();
+        int superTileDim = RoundedSqrt<int,int>(Ainfo.worldSize) / gridDim;
+
+        auto SuperTileColor = [&gridDim, &superTileDim](int rowRank, int colRank) {
+            return ( (rowRank / superTileDim) ) + ( ((colRank) / superTileDim) * gridDim );
+        };
+
+        auto SuperTileKey = [&gridDim, &superTileDim](int rowRank, int colRank) {
+            return ( ((rowRank / superTileDim) % superTileDim) + ((colRank % superTileDim) * superTileDim ) );
+        };
+
+        // Make communicators corresponding to each supertile
+        MPI_Comm superTileComm;
+        MPI_Comm_split(Ainfo.gridComm, 
+                        SuperTileColor(Ainfo.rowRank, Ainfo.colRank),
+                        SuperTileKey(Ainfo.rowRank, Ainfo.colRank),
+                        &superTileComm);
+                        
+        // Pack everything into a single buffer
+        int msgCount = 5;
+        float sendBuf[] = {(const float)inputs.FLOPS, 
+                            (const float)Ainfo.GetNnz(), 
+                            (const float)Binfo.GetNnz(), 
+                            (const float)inputs.outputNnzIntermediate, 
+                            (const float)inputs.outputNnzFinal};
+        float * recvBuf = new float[msgCount];
+
+        // Reduce into top left corner of each supertile
+        MPI_Reduce((void*)(sendBuf), (void*)(recvBuf), msgCount, MPI_FLOAT, MPI_SUM, 0, superTileComm);
+
+        // Local sample to be gathered into featureMat
+        float locSample[] = {recvBuf[0], //FLOPS
+                          (const float)Ainfo.locNrowsExact,
+                          (const float) Binfo.locNrowsExact,
+                          (const float)Ainfo.locNcolsExact,
+                          (const float)Binfo.locNcolsExact,
+                          recvBuf[1], //nnz-A
+                          recvBuf[2], //nnz-B
+                          recvBuf[3], //outputnnz-inter
+                          recvBuf[4], //outputnnz-fina;
+                          (const float)params.GetNodes(),
+                          (const float)params.GetPPN()};
+
+        //Communicator consisting of rank 0 and all top left corner ranks
+        MPI_Group worldGroup;
+        MPI_Comm_group(MPI_COMM_WORLD, &worldGroup);
+        
+        std::vector<int> topLeftRanks(Ainfo.worldSize / (superTileDim*superTileDim));
+        for (int i=0; i<topLeftRanks.size(); i++) {
+            topLeftRanks[i] = ((i*superTileDim) % gridDim) + ((i / gridDim) * (gridDim * superTileDim * superTileDim));
+        }
+
+        MPI_Group topLeftGroup;
+        MPI_Group_incl(worldGroup, topLeftRanks.size(), topLeftRanks.data(), &topLeftGroup);
+        
+        MPI_Comm topLeftComm;
+        MPI_Comm_create(MPI_COMM_WORLD, topLeftGroup, &topLeftComm);
+
+        // Gather into featureMat on rank 0
+        if (topLeftComm!=MPI_COMM_NULL) {
+            MPI_Gather((void*)(locSample), nFeatures, MPI_FLOAT, (void*)(featureMat.data()), nFeatures,
+                        MPI_FLOAT, 0, topLeftComm);
+        }
+
+#ifdef PROFILE
+        infoPtr->EndTimer("FeatureCollection");
+        debugPtr->LogVecSameLine(featureMat, "FeatureMat");
+#endif
+
+        MPI_Barrier(Ainfo.gridComm);
+
+        return featureMat;
 
     }
 

@@ -165,11 +165,15 @@ public:
 
         std::vector<float> predictions = model.Predict(inputs, searchSpace);
 
+#ifdef DEBUG
+        debugPtr->Print0("Searching for min");
+#endif
+
         bestParams = searchSpace[std::distance(predictions.begin(), std::min_element(predictions.begin(), predictions.end()))];
 
 #ifdef PROFILE
 
-        model.WritePrediction(predictions);
+        model.WritePrediction(searchSpace, predictions);
 
         infoPtr->PutGlobal("BestParams", bestParams.OutStr());
         infoPtr->PutGlobal("BestTime", std::to_string(ReduceMin(predictions)));
