@@ -1028,7 +1028,9 @@ public:
                                     std::vector<SpGEMMParams>& searchSpace) {
 
         std::vector<float> times(searchSpace.size());
-
+#ifdef TIMING
+        infoPtr->StartTimerGlobal("Prediction");
+#endif
         std::transform(searchSpace.begin(), searchSpace.end(), times.begin(),
             [&inputs, this](auto& params) {
 
@@ -1049,11 +1051,18 @@ public:
                                 paramTimes.begin(), std::plus<>());
                 std::transform(paramTimes.begin(), paramTimes.end(), mergeTimes.begin(), paramTimes.begin(),
                                 std::plus<>());
+#ifdef TIMING
+                infoPtr->WriteInfo();
+                infoPtr->Clear();
+#endif
 
                 return ReduceMax(paramTimes);
             }
         );
 
+#ifdef TIMING
+        infoPtr->EndTimerGlobal("Prediction");
+#endif
         return times;
 
     }
@@ -1154,6 +1163,8 @@ public:
 
 #ifdef PROFILE
         infoPtr->EndTimer("FeatureCollection");
+#endif
+#ifdef DEBUG
         debugPtr->LogVecSameLine(featureMat, "FeatureMat");
 #endif
 
@@ -1166,6 +1177,10 @@ public:
     template <typename IT, typename NT>
     std::vector<float> BcastTime(std::vector<float>& X, SpGEMMParams& params) {
         
+#ifdef PROFILE
+        infoPtr->StartTimer("BcastCompute");
+#endif
+
         auto TreeBcast = [this](int commSize, IT msgSize) {
             float alpha = this->platformParams.GetInternodeAlpha() * std::log2(commSize);
             float beta = (std::log2(commSize) * msgSize) / this->platformParams.GetInternodeBeta();
@@ -1211,11 +1226,18 @@ public:
 
         }
         
+#ifdef PROFILE
+        infoPtr->EndTimer("BcastCompute");
+#endif
+
         return finalTimes;
     }
 
     
     std::vector<float> LocalSpGEMMTime(DMatrixHandle& X, SpGEMMParams& params) {
+#ifdef PROFILE
+        infoPtr->StartTimer("MultCompute");
+#endif
 
         //TODO: Does this matter?
         char const config[] =
@@ -1227,13 +1249,19 @@ public:
         const float * prediction;
         XGB_CHECK(XGBoosterPredictFromDMatrix(multBstHandle, X, config, &outShape, &outDim, &prediction));
 
+#ifdef PROFILE
+        infoPtr->EndTimer("MultCompute");
+#endif
+
         return std::vector<float>(prediction, prediction+params.GetTotalProcs());
   
     }
 
 
     std::vector<float> MergeTime(DMatrixHandle& X, SpGEMMParams& params) {
-
+#ifdef PROFILE
+        infoPtr->StartTimer("MergeCompute");
+#endif
         //TODO: Does this matter?
         char const config[] =
         "{\"training\": false, \"type\": 0, "
@@ -1243,6 +1271,10 @@ public:
         const bst_ulong * outShape;
         const float * prediction;
         XGB_CHECK(XGBoosterPredictFromDMatrix(mergeBstHandle, X, config, &outShape, &outDim, &prediction));
+
+#ifdef PROFILE
+        infoPtr->EndTimer("MergeCompute");
+#endif
 
         return std::vector<float>(prediction, prediction+params.GetTotalProcs());
     }

@@ -40,6 +40,7 @@ public:
 
     /* Write all info into file */
     void WriteInfo() {
+        ofs<<"----PREDICTION INFO----"<<std::endl;
         std::for_each(infoMap.begin(), infoMap.end(),
             [this](auto const& elem) {
                 this->ofs<<elem.first<<":"<<elem.second<<" ";
