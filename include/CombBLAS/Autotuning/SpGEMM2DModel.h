@@ -1056,10 +1056,23 @@ public:
 
                 auto featureMat = this->MakeFeatureMatImpl(inputs, params);
 
-                float bcastTime = this->BcastTime(featureMat, params);
-                float localSpGEMMTime = this->LocalSpGEMMTime(featureMat, params);
-                float mergeTime = this->MergeTime(featureMat, params);
-                return bcastTime + localSpGEMMTime + mergeTime;
+                DMatrixHandle featureMatHandle;
+                XGB_CHECK(XGDMatrixCreateFromMat(featureMat.data(), params.GetTotalProcs(), nFeatures, 0.0,
+                                                    &featureMatHandle));
+                
+                // Each of these do a prediction for the entire grid
+                auto bcastTimes = this->BcastTime<AIT, ANT>(featureMat, params); // Don't need Dmat here
+                auto localSpGEMMTimes = this->LocalSpGEMMTime(featureMatHandle, params);
+                auto mergeTimes = this->MergeTime(featureMatHandle, params);
+                
+                // Sum all times, then return the max
+                std::vector<float> paramTimes(params.GetTotalProcs());
+                std::transform(bcastTimes.begin(), bcastTimes.end(), localSpGEMMTimes.begin(),
+                                paramTimes.begin(), std::plus<>());
+                std::transform(paramTimes.begin(), paramTimes.end(), mergeTimes.begin(), paramTimes.begin(),
+                                std::plus<>());
+
+                return ReduceMax(paramTimes);
             }
         );
 
@@ -1157,6 +1170,10 @@ public:
                         MPI_FLOAT, 0, topLeftComm);
         }
 
+
+        //TODO: REMOVE THIS BCAST, it should not be necessary
+        MPI_Bcast((void*)(featureMat.data()), featureMat.size(), MPI_FLOAT, 0, Ainfo.gridComm);
+
 #ifdef PROFILE
         infoPtr->EndTimer("FeatureCollection");
         debugPtr->LogVecSameLine(featureMat, "FeatureMat");
@@ -1168,16 +1185,88 @@ public:
 
     }
 
-    
-    float BcastTime(std::vector<float>& X, SpGEMMParams& params) {
+    template <typename IT, typename NT>
+    std::vector<float> BcastTime(std::vector<float>& X, SpGEMMParams& params) {
+        
+        auto TreeBcast = [this](int commSize, IT msgSize) {
+            float alpha = this->platformParams.GetInternodeAlpha() * std::log2(commSize);
+            float beta = (std::log2(commSize) * msgSize) / this->platformParams.GetInternodeBeta();
+            return (alpha + beta);
+        };
+
+        auto MsgSize = [](IT nnz) {
+            return nnz*sizeof(NT) + nnz*sizeof(IT) + (nnz + 1) * sizeof(IT);
+        };
+
+
+        // Compute each local bcast time
+        std::vector<float> timesA(params.GetGridDim());
+        std::vector<float> timesB(params.GetGridDim());
+        for (int k=0; k<params.GetTotalProcs(); k++) {
+
+            IT nnzA = static_cast<IT>(X[k*nFeatures + 5]); //TODO: Hardcoding these numbers makes me ill
+            IT nnzB = static_cast<IT>(X[k*nFeatures + 6]);
+
+            IT bytesA = MsgSize(nnzA);
+            IT bytesB = MsgSize(nnzB);
+            
+            float bcastTimeA = TreeBcast(params.GetGridDim(), bytesA); 
+            float bcastTimeB = TreeBcast(params.GetGridDim(), bytesB); 
+            
+            int i = k % params.GetGridDim();
+            int j = k / params.GetGridDim();
+
+            timesA[i] += bcastTimeA;
+            timesB[j] += bcastTimeB;
+
+        }
+
+
+        // Compute final array of bcast times
+        std::vector<float> finalTimes(params.GetTotalProcs());
+        for (int k=0; k<finalTimes.size(); k++) {
+            
+            int i = k % params.GetGridDim();
+            int j = k / params.GetGridDim();
+
+            finalTimes[k] = timesA[i] + timesB[j];
+
+        }
+        
+        return finalTimes;
     }
 
     
-    float LocalSpGEMMTime( std::vector<float>& X, SpGEMMParams& params) {
+    std::vector<float> LocalSpGEMMTime(DMatrixHandle& X, SpGEMMParams& params) {
+
+        //TODO: Does this matter?
+        char const config[] =
+        "{\"training\": false, \"type\": 0, "
+        "\"iteration_begin\": 0, \"iteration_end\": 0, \"strict_shape\": false}";
+
+        bst_ulong outDim;
+        const bst_ulong * outShape;
+        const float * prediction;
+        XGB_CHECK(XGBoosterPredictFromDMatrix(multBstHandle, X, config, &outShape, &outDim, &prediction));
+
+        return std::vector<float>(prediction, prediction+params.GetTotalProcs());
+  
     }
 
 
-    float MergeTime(std::vector<float>& X, SpGEMMParams& params) {
+    std::vector<float> MergeTime(DMatrixHandle& X, SpGEMMParams& params) {
+
+        //TODO: Does this matter?
+        char const config[] =
+        "{\"training\": false, \"type\": 0, "
+        "\"iteration_begin\": 0, \"iteration_end\": 0, \"strict_shape\": false}";
+
+        bst_ulong outDim;
+        const bst_ulong * outShape;
+        const float * prediction;
+        XGB_CHECK(XGBoosterPredictFromDMatrix(mergeBstHandle, X, config, &outShape, &outDim, &prediction));
+
+        return std::vector<float>(prediction, prediction+params.GetTotalProcs());
     }
 
 
