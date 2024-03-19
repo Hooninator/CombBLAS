@@ -232,7 +232,7 @@ std::string TupleStr(const std::tuple<T,T,T>& tuple) {
 
 template <typename T>
 T ReduceMin(std::vector<T>& v) {
-    return std::reduce(v.begin(), v.end(), T(0),
+    return std::reduce(v.begin(), v.end(), std::numeric_limits<T>::max(),
         [](T currMin, T curr) {return std::min(currMin, curr);}
     );
 }

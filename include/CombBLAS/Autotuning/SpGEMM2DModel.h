@@ -67,7 +67,7 @@ public:
         infoPtr->OFS()<<"----RUNTIME ESTIMATES----"<<std::endl;
         ASSERT(searchSpace.size()==predictions.size(), "sizes not equal");
         for (int i=0; i<searchSpace.size(); i++) {
-            infoPtr->OFS()<<searchSpace[i]<<":"<<predictions[i]<<"s ";
+            infoPtr->OFS()<<searchSpace[i]<<":"<<predictions[i]/1e6<<"s ";
         }
         infoPtr->OFS()<<std::endl;
     }
@@ -973,26 +973,14 @@ public:
             Ainfo(A), Binfo(B), FLOPS(0), outputNnzIntermediate(0), outputNnzFinal(0)
         {
 
-#ifdef DEBUG
-            debugPtr->Print0("Starting info construction");
-#endif
-
 #ifdef PROFILE
             infoPtr->StartTimerGlobal("FLOPEstimation");
-#endif
-
-#ifdef DEBUG
-            debugPtr->Print0("Starting FLOP estimation");
 #endif
 
             EstimateFLOP<PTTF, AIT, ANT, BNT, ADER, BDER>(A,B,false,false,&FLOPS);
 
 #ifdef PROFILE
             infoPtr->EndTimerGlobal("FLOPEstimation");
-#endif
-
-#ifdef DEBUG
-            debugPtr->Print0("FLOP estimation complete");
 #endif
 
 #ifdef PROFILE
@@ -1008,9 +996,6 @@ public:
 				}
 			}
 
-#ifdef DEBUG
-            debugPtr->Print0("First output nnz estimation complete");
-#endif
             
 #ifdef PROFILE
             infoPtr->EndTimerGlobal("NnzIntermediate");
@@ -1019,11 +1004,8 @@ public:
 #ifdef PROFILE
             infoPtr->StartTimerGlobal("NnzFinal");
 #endif
-            outputNnzFinal = EstPerProcessNnzSUMMAMax(A,B,false);
 
-#ifdef DEBUG
-            debugPtr->Print0("Second output nnz estimation complete");
-#endif
+            outputNnzFinal = EstPerProcessNnzSUMMAMax(A,B,false);
 
 #ifdef PROFILE
             infoPtr->EndTimerGlobal("NnzFinal");
@@ -1044,10 +1026,6 @@ public:
     template <typename AIT, typename ANT, typename ADER, typename BIT, typename BNT, typename BDER>
     std::vector<float> PredictImpl(Inputs<AIT,ANT,ADER,BIT,BNT,BDER>& inputs,
                                     std::vector<SpGEMMParams>& searchSpace) {
-
-#ifdef DEBUG
-        debugPtr->Print0("Beginning prediction");
-#endif
 
         std::vector<float> times(searchSpace.size());
 
@@ -1075,10 +1053,6 @@ public:
                 return ReduceMax(paramTimes);
             }
         );
-
-#ifdef DEBUG
-        debugPtr->Print0("Ended prediction");
-#endif
 
         return times;
 
