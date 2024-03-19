@@ -50,6 +50,9 @@ public:
     }
 
     void WriteInfoGlobal() {
+
+        ofs<<std::endl;
+
         ofs<<"----GLOBALS----"<<std::endl;
         std::for_each(infoMapGlobal.begin(), infoMapGlobal.end(),
             [this](auto const& elem) {
@@ -57,6 +60,20 @@ public:
             }
         );
         ofs<<std::endl;
+        
+        float sum = std::atof(infoMapGlobal[std::string("TuneSpGEMM2DPhase")].c_str());
+
+        //TODO: better skipping
+        ofs<<"----PERCENTAGES----"<<std::endl;
+        std::for_each(infoMapGlobal.begin(), infoMapGlobal.end(),
+            [this, sum](auto const& elem) {
+                if (strcmp(elem.first.c_str(), "BestParams")) {
+                    this->ofs<<elem.first<<":"<<std::atof(elem.second.c_str())*100/sum<<"% ";
+                }
+            }
+        );
+        ofs<<std::endl;
+
     }
 
 

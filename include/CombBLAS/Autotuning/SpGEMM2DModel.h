@@ -970,7 +970,8 @@ public:
         typedef PlusTimesSRing<ANT,BNT> PTTF;
 
         Inputs(SpParMat<AIT,ANT,ADER>& A, SpParMat<BIT,BNT,BDER>& B):
-            Ainfo(A), Binfo(B), FLOPS(0), outputNnzIntermediate(0), outputNnzFinal(0)
+            Ainfo(A), Binfo(B), FLOPS(0), outputNnzIntermediate(0), outputNnzFinal(0),
+            globalFeatures(0)
         {
 
 #ifdef PROFILE
@@ -995,7 +996,6 @@ public:
 					outputNnzIntermediate += outputNnzCol[i];
 				}
 			}
-
             
 #ifdef PROFILE
             infoPtr->EndTimerGlobal("NnzIntermediate");
@@ -1010,6 +1010,24 @@ public:
 #ifdef PROFILE
             infoPtr->EndTimerGlobal("NnzFinal");
 #endif
+
+            std::vector<float> sendBuf{(const float)FLOPS, 
+                                        (const float)Ainfo.locNrowsExact,
+                                        (const float)Binfo.locNrowsExact,
+                                        (const float)Ainfo.locNcolsExact,
+                                        (const float)Binfo.locNcolsExact,
+                                        (const float)Ainfo.locNnz, 
+                                        (const float)Binfo.locNnz, 
+                                        (const float)outputNnzIntermediate, 
+                                        (const float)outputNnzFinal,
+                                        0.0, 0.0}; //These last two placeholders are where nodes and ppn will go
+
+            globalFeatures.resize(sendBuf.size()*Ainfo.worldSize);
+
+            // Gather into globalFeatures 
+            // We do an allgather here because I think we'll need to distribute the search space at some point
+            MPI_Allgather((void*)(sendBuf.data()), sendBuf.size(), MPI_FLOAT, (void*)(globalFeatures.data()),
+                        sendBuf.size(), MPI_FLOAT, Ainfo.gridComm);
         
         }
 
@@ -1020,6 +1038,8 @@ public:
         AIT outputNnzIntermediate;
         AIT outputNnzFinal;
 
+        std::vector<float> globalFeatures;
+
     };
 
 
@@ -1028,9 +1048,11 @@ public:
                                     std::vector<SpGEMMParams>& searchSpace) {
 
         std::vector<float> times(searchSpace.size());
-#ifdef TIMING
+
+#ifdef PROFILE
         infoPtr->StartTimerGlobal("Prediction");
 #endif
+
         std::transform(searchSpace.begin(), searchSpace.end(), times.begin(),
             [&inputs, this](auto& params) {
 
@@ -1045,13 +1067,20 @@ public:
                 auto localSpGEMMTimes = this->LocalSpGEMMTime(featureMatHandle, params);
                 auto mergeTimes = this->MergeTime(featureMatHandle, params);
                 
+#ifdef PROFILE
+                infoPtr->StartTimer("MaxReduction");
+#endif
                 // Sum all times, then return the max
                 std::vector<float> paramTimes(params.GetTotalProcs());
                 std::transform(bcastTimes.begin(), bcastTimes.end(), localSpGEMMTimes.begin(),
                                 paramTimes.begin(), std::plus<>());
                 std::transform(paramTimes.begin(), paramTimes.end(), mergeTimes.begin(), paramTimes.begin(),
                                 std::plus<>());
-#ifdef TIMING
+#ifdef PROFILE
+                infoPtr->EndTimer("MaxReduction");
+#endif
+
+#ifdef PROFILE
                 infoPtr->WriteInfo();
                 infoPtr->Clear();
 #endif
@@ -1060,7 +1089,7 @@ public:
             }
         );
 
-#ifdef TIMING
+#ifdef PROFILE
         infoPtr->EndTimerGlobal("Prediction");
 #endif
         return times;
@@ -1099,67 +1128,38 @@ public:
             return ( ((rowRank ) % superTileDim) + ((colRank % superTileDim) * superTileDim ) );
         };
 
-        // Make communicators corresponding to each supertile
-        MPI_Comm superTileComm;
-        MPI_Comm_split(Ainfo.gridComm, 
-                        SuperTileColor(Ainfo.rowRank, Ainfo.colRank),
-                        SuperTileKey(Ainfo.rowRank, Ainfo.colRank),
-                        &superTileComm);
-                        
-        // Pack everything into a single buffer
-        int msgCount = 9;
-        float sendBuf[] = {(const float)inputs.FLOPS, 
-                            (const float)Ainfo.locNrowsExact,
-                            (const float)Binfo.locNrowsExact,
-                            (const float)Ainfo.locNcolsExact,
-                            (const float)Binfo.locNcolsExact,
-                            (const float)Ainfo.locNnz, 
-                            (const float)Binfo.locNnz, 
-                            (const float)inputs.outputNnzIntermediate, 
-                            (const float)inputs.outputNnzFinal};
-        float * recvBuf = new float[msgCount];
+        // Reduce into featureMat
+        for (int k=0; k<Ainfo.worldSize; k++) {
 
-        // Reduce into top left corner of each supertile
-        MPI_Reduce((void*)(sendBuf), (void*)(recvBuf), msgCount, MPI_FLOAT, MPI_SUM, 0, superTileComm);
+            int i = k % RoundedSqrt<int,int>(Ainfo.worldSize);
+            int j = k / RoundedSqrt<int,int>(Ainfo.worldSize);
+            
+            int superTileIdx = SuperTileColor(i, j);
+            
+            int startIdx = superTileIdx*nFeatures;
+            int endIdx = (superTileIdx+1)*nFeatures;
 
-        // Local sample to be gathered into featureMat
-        float locSample[] = {recvBuf[0],
-                             recvBuf[1]/(float)std::sqrt(Ainfo.worldSize),
-                             recvBuf[2]/(float)std::sqrt(Ainfo.worldSize),
-                             recvBuf[3]/(float)std::sqrt(Ainfo.worldSize),
-                             recvBuf[4]/(float)std::sqrt(Ainfo.worldSize),
-                             recvBuf[5],
-                             recvBuf[6],
-                             recvBuf[7],
-                             recvBuf[8],
-                             (const float)params.GetNodes(),
-                             (const float)params.GetPPN()};
+            std::transform(inputs.globalFeatures.begin() + (i*nFeatures), 
+                            inputs.globalFeatures.begin() + ((i+1)*nFeatures),
+                            featureMat.begin() + superTileIdx*nFeatures,
+                            featureMat.begin() + superTileIdx*nFeatures,
+                            std::plus<>());
 
-        //Communicator consisting of rank 0 and all top left corner ranks
-        MPI_Group worldGroup;
-        MPI_Comm_group(MPI_COMM_WORLD, &worldGroup);
-        
-        std::vector<int> topLeftRanks(Ainfo.worldSize / (superTileDim*superTileDim));
-        for (int i=0; i<topLeftRanks.size(); i++) {
-            topLeftRanks[i] = ((i*superTileDim)%RoundedSqrt<int,int>(Ainfo.worldSize)) 
-                            + ((i / gridDim) * (gridDim * superTileDim * superTileDim));
         }
 
-        MPI_Group topLeftGroup;
-        MPI_Group_incl(worldGroup, topLeftRanks.size(), topLeftRanks.data(), &topLeftGroup);
-        
-        MPI_Comm topLeftComm;
-        MPI_Comm_create(MPI_COMM_WORLD, topLeftGroup, &topLeftComm);
+        // Reduction for Nodes and PPN is not required
+        for (int k=0; k<params.GetTotalProcs(); k++) {
+            featureMat[k*nFeatures + (nFeatures-2)] = params.GetNodes();
+            featureMat[k*nFeatures + (nFeatures-1)] = params.GetPPN();
 
-        // Gather into featureMat on rank 0
-        if (topLeftComm!=MPI_COMM_NULL) {
-            MPI_Gather((void*)(locSample), nFeatures, MPI_FLOAT, (void*)(featureMat.data()), nFeatures,
-                        MPI_FLOAT, 0, topLeftComm);
+            //Solve overcounting the dimensions
+            //This is necessary until I can sit down and make this whole process less horrible
+            featureMat[k*nFeatures + 1] /= RoundedSqrt<int,int>(Ainfo.worldSize);
+            featureMat[k*nFeatures + 2] /= RoundedSqrt<int,int>(Ainfo.worldSize);
+            featureMat[k*nFeatures + 3] /= RoundedSqrt<int,int>(Ainfo.worldSize);
+            featureMat[k*nFeatures + 4] /= RoundedSqrt<int,int>(Ainfo.worldSize);
         }
 
-
-        //TODO: REMOVE THIS BCAST, it should not be necessary
-        MPI_Bcast((void*)(featureMat.data()), featureMat.size(), MPI_FLOAT, 0, Ainfo.gridComm);
 
 #ifdef PROFILE
         infoPtr->EndTimer("FeatureCollection");
