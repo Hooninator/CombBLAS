@@ -1087,7 +1087,7 @@ public:
         };
 
         auto SuperTileKey = [&gridDim, &superTileDim](int rowRank, int colRank) {
-            return ( ((rowRank / superTileDim) % superTileDim) + ((colRank % superTileDim) * superTileDim ) );
+            return ( ((rowRank ) % superTileDim) + ((colRank % superTileDim) * superTileDim ) );
         };
 
         // Make communicators corresponding to each supertile
@@ -1098,10 +1098,14 @@ public:
                         &superTileComm);
                         
         // Pack everything into a single buffer
-        int msgCount = 5;
+        int msgCount = 9;
         float sendBuf[] = {(const float)inputs.FLOPS, 
-                            (const float)Ainfo.GetNnz(), 
-                            (const float)Binfo.GetNnz(), 
+                            (const float)Ainfo.locNrowsExact,
+                            (const float)Binfo.locNrowsExact,
+                            (const float)Ainfo.locNcolsExact,
+                            (const float)Binfo.locNcolsExact,
+                            (const float)Ainfo.locNnz, 
+                            (const float)Binfo.locNnz, 
                             (const float)inputs.outputNnzIntermediate, 
                             (const float)inputs.outputNnzFinal};
         float * recvBuf = new float[msgCount];
@@ -1110,17 +1114,17 @@ public:
         MPI_Reduce((void*)(sendBuf), (void*)(recvBuf), msgCount, MPI_FLOAT, MPI_SUM, 0, superTileComm);
 
         // Local sample to be gathered into featureMat
-        float locSample[] = {recvBuf[0], //FLOPS
-                          (const float)Ainfo.locNrowsExact,
-                          (const float) Binfo.locNrowsExact,
-                          (const float)Ainfo.locNcolsExact,
-                          (const float)Binfo.locNcolsExact,
-                          recvBuf[1], //nnz-A
-                          recvBuf[2], //nnz-B
-                          recvBuf[3], //outputnnz-inter
-                          recvBuf[4], //outputnnz-fina;
-                          (const float)params.GetNodes(),
-                          (const float)params.GetPPN()};
+        float locSample[] = {recvBuf[0],
+                             recvBuf[1]/(float)std::sqrt(Ainfo.worldSize),
+                             recvBuf[2]/(float)std::sqrt(Ainfo.worldSize),
+                             recvBuf[3]/(float)std::sqrt(Ainfo.worldSize),
+                             recvBuf[4]/(float)std::sqrt(Ainfo.worldSize),
+                             recvBuf[5],
+                             recvBuf[6],
+                             recvBuf[7],
+                             recvBuf[8],
+                             (const float)params.GetNodes(),
+                             (const float)params.GetPPN()};
 
         //Communicator consisting of rank 0 and all top left corner ranks
         MPI_Group worldGroup;
