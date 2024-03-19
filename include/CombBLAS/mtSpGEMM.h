@@ -847,17 +847,18 @@ IT EstimateLocalFLOP
         numThreads = omp_get_num_threads();
     }
 #endif
-    IT* flopC = estimateFLOP(A, B);
-    IT* flopptr = prefixsum<IT>(flopC, Bdcsc->nzc, numThreads);
-    IT flop = flopptr[Bdcsc->nzc];
-    delete [] flopC;
+    //IT* flopC = estimateFLOP(A, B);
+    //IT* flopptr = prefixsum<IT>(flopC, Bdcsc->nzc, numThreads);
+    //IT flop = flopptr[Bdcsc->nzc];
+    //delete [] flopC;
+    IT flop = estimateFLOPFast(A,B);
 
     if(clearA)
         delete const_cast<SpDCCols<IT, NT1> *>(&A);
     if(clearB)
         delete const_cast<SpDCCols<IT, NT2> *>(&B);
     
-    delete [] flopptr;
+    //delete [] flopptr;
     return flop;
 }
 
@@ -1307,6 +1308,70 @@ IT* estimateFLOP(const SpDCCols<IT, NT1> & A,const SpDCCols<IT, NT2> & B, IT * a
 }
 
 
+// estimate the number of floating point operations of SpGEMM
+template <typename IT, typename NT1, typename NT2>
+IT estimateFLOPFast(const SpDCCols<IT, NT1> & A,const SpDCCols<IT, NT2> & B, IT * aux = nullptr)
+{
+    IT nnzA = A.getnnz();
+    if(A.isZero() || B.isZero())
+    {
+        return 0;
+    }
+    
+    Dcsc<IT,NT1>* Adcsc = A.GetDCSC();
+    Dcsc<IT,NT2>* Bdcsc = B.GetDCSC();
+    
+    float cf  = static_cast<float>(A.getncol()+1) / static_cast<float>(Adcsc->nzc);
+    IT csize = static_cast<IT>(ceil(cf));   // chunk size
+                                            
+    bool deleteAux = false;
+    if(aux==nullptr)
+    {
+        deleteAux = true;
+        Adcsc->ConstructAux(A.getncol(), aux);
+    }
+	
+	
+    int numThreads = 1;
+#ifdef THREADED
+#pragma omp parallel
+    {
+        numThreads = omp_get_num_threads();
+    }
+#endif
+    
+
+    IT flopC = 0;
+	
+    // thread private space for heap and colinds
+    std::vector<std::vector< std::pair<IT,IT>>> colindsVec(numThreads);
+
+#ifdef THREADED
+#pragma omp parallel for reduction(+:flopC)
+#endif
+    for(int i=0; i < Bdcsc->nzc; ++i)
+    {
+        size_t nnzcolB = Bdcsc->cp[i+1] - Bdcsc->cp[i]; //nnz in the current column of B
+		int myThread = 0;
+#ifdef THREADED
+        myThread = omp_get_thread_num();
+#endif
+        if(colindsVec[myThread].size() < nnzcolB) //resize thread private vectors if needed
+        {
+            colindsVec[myThread].resize(nnzcolB);
+        }
+		
+        // colinds.first vector keeps indices to A.cp, i.e. it dereferences "colnums" vector (above),
+        // colinds.second vector keeps the end indices (i.e. it gives the index to the last valid element of A.cpnack)
+        Adcsc->FillColInds(Bdcsc->ir + Bdcsc->cp[i], nnzcolB, colindsVec[myThread], aux, csize);
+        for (IT j = 0; (unsigned)j < nnzcolB; ++j) {
+            flopC += colindsVec[myThread][j].second - colindsVec[myThread][j].first;
+        }
+    }
+    if(deleteAux)
+    	delete [] aux;
+    return flopC;
+}
 
 
 ////////////////////////////////////////////////////////////////////////////////
