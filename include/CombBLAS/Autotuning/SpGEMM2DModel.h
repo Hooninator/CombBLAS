@@ -1004,6 +1004,142 @@ public:
         
         }
 
+		
+		template <typename IU, typename NU1, typename NU2, typename UDERA, typename UDERB>
+		void ComputeProblemStats(SpParMat<IU,NU1,UDERA> & A, SpParMat<IU,NU2,UDERB> & B, 
+									int64_t * nnzC_SUMMA, int64_t * nnzC_local, int64_t * FLOPS_local)
+		{
+			typedef typename UDERA::LocalIT LIA;
+			typedef typename UDERB::LocalIT LIB;
+			static_assert(std::is_same<LIA, LIB>::value, "local index types for both input matrices should be the same");
+
+			double t0, t1;
+
+			if(A.getncol() != B.getnrow())
+			{
+				std::ostringstream outs;
+				outs << "Can not multiply, dimensions does not match"<< std::endl;
+				outs << A.getncol() << " != " << B.getnrow() << std::endl;
+				SpParHelper::Print(outs.str());
+				MPI_Abort(MPI_COMM_WORLD, DIMMISMATCH);
+				return;
+			}
+
+			int stages, dummy;     // last two parameters of ProductGrid are ignored for Synch multiplication
+			std::shared_ptr<CommGrid> GridC = ProductGrid((A.getcommgrid()).get(), (B.getcommgrid()).get(), stages, dummy, dummy);
+
+			MPI_Barrier(GridC->GetWorld());
+
+			LIA ** ARecvSizes = SpHelper::allocate2D<LIA>(UDERA::esscount, stages);
+			LIB ** BRecvSizes = SpHelper::allocate2D<LIB>(UDERB::esscount, stages);
+			SpParHelper::GetSetSizes( *(A.seqptr()), ARecvSizes, (A.getcommgrid())->GetRowWorld());
+			SpParHelper::GetSetSizes( *(B.seqptr()), BRecvSizes, (B.getcommgrid())->GetColWorld());
+
+			// Remotely fetched matrices are stored as pointers
+			UDERA * ARecv;
+			UDERB * BRecv;
+
+			int Aself = (A.getcommgrid())->GetRankInProcRow();
+			int Bself = (B.getcommgrid())->GetRankInProcCol();
+
+			double bcastTime = 0;
+			double flopTime = 0;
+			double nnzTime = 0;
+
+			for(int i = 0; i < stages; ++i)
+			{
+				std::vector<LIA> ess;
+				if(i == Aself)
+				{
+					ARecv = A.seqptr();    // shallow-copy
+				}
+				else
+				{
+					ess.resize(UDERA::esscount);
+					for(int j=0; j< UDERA::esscount; ++j)
+					{
+						ess[j] = ARecvSizes[j][i];        // essentials of the ith matrix in this row
+					}
+					ARecv = new UDERA();                // first, create the object
+				}
+#ifdef PROFILE
+                t0 = MPI_Wtime();
+#endif
+
+				SpParHelper::BCastMatrix(GridC->GetRowWorld(), *ARecv, ess, i);    // then, receive its elements
+#ifdef PROFILE
+                t1 = MPI_Wtime();
+                bcastTime += (t1-t0);
+#endif
+				ess.clear();
+
+				if(i == Bself)
+				{
+					BRecv = B.seqptr();    // shallow-copy
+				}
+				else	
+			    {
+					ess.resize(UDERB::esscount);
+					for(int j=0; j< UDERB::esscount; ++j)
+					{
+						ess[j] = BRecvSizes[j][i];
+					}
+					BRecv = new UDERB();
+				}
+
+#ifdef PROFILE
+                t0 = MPI_Wtime();
+#endif
+				SpParHelper::BCastMatrix(GridC->GetColWorld(), *BRecv, ess, i);    // then, receive its elements
+
+#ifdef PROFILE
+                t1 = MPI_Wtime();
+                bcastTime += (t1-t0);
+#endif
+				if (BRecv->isZero() || ARecv->isZero()) continue;
+
+#ifdef PROFILE
+                t0 = MPI_Wtime();
+#endif
+				LIB nnzC = estimateNNZFast(*ARecv, *BRecv);
+#ifdef PROFILE
+                t1 = MPI_Wtime();
+                nnzTime += (t1-t0);
+#endif
+				*nnzC_SUMMA = std::max(nnzC, *nnzC_SUMMA);
+#ifdef PROFILE
+                t0 = MPI_Wtime();
+#endif
+				*FLOPS_local += estimateFLOPFast(*ARecv, *BRecv);
+#ifdef PROFILE
+                t1 = MPI_Wtime();
+                flopTime += (t1-t0);
+#endif
+
+				if (i==Aself && i==Bself) {
+					*nnzC_local = nnzC;
+				}
+
+				// delete received data
+				if(i != Aself)
+					delete ARecv;
+				if(i != Bself)
+					delete BRecv;
+			}
+
+			SpHelper::deallocate2D(ARecvSizes, UDERA::esscount);
+			SpHelper::deallocate2D(BRecvSizes, UDERB::esscount);
+
+#ifdef PROFILE
+            infoPtr->PutGlobal("FeatureBcastTime", std::to_string(bcastTime));
+            infoPtr->PutGlobal("FeatureNnzInit", std::to_string(nnzTime));
+            infoPtr->PutGlobal("FeatureFLOPInit", std::to_string(flopTime));
+#endif
+
+		}
+
+		
+
         SpParMatInfoPhase<AIT,ANT,ADER> Ainfo;
         SpParMatInfoPhase<BIT,BNT,BDER> Binfo;
         

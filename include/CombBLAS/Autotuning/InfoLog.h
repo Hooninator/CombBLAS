@@ -43,7 +43,7 @@ public:
         ofs<<"----PREDICTION INFO----"<<std::endl;
         std::for_each(infoMap.begin(), infoMap.end(),
             [this](auto const& elem) {
-                this->ofs<<elem.first<<":"<<elem.second<<" ";
+                this->ofs<<elem.first<<":"<<elem.second<<std::endl;
             }
         );
         ofs<<std::endl;
@@ -53,10 +53,10 @@ public:
 
         ofs<<std::endl;
 
-        ofs<<"----GLOBALS----"<<std::endl;
+        ofs<<"----GLOBALS RANK " <<rank<<"----"<<std::endl;
         std::for_each(infoMapGlobal.begin(), infoMapGlobal.end(),
             [this](auto const& elem) {
-                this->ofs<<elem.first<<":"<<elem.second<<" ";
+                this->ofs<<elem.first<<":"<<elem.second<<std::endl;
             }
         );
         ofs<<std::endl;
@@ -64,11 +64,11 @@ public:
         float sum = std::atof(infoMapGlobal[std::string("TuneSpGEMM2DPhase")].c_str());
 
         //TODO: better skipping
-        ofs<<"----PERCENTAGES----"<<std::endl;
+        ofs<<"----PERCENTAGES RANK " <<rank<<"----"<<std::endl;
         std::for_each(infoMapGlobal.begin(), infoMapGlobal.end(),
             [this, sum](auto const& elem) {
-                if (strcmp(elem.first.c_str(), "BestParams")) {
-                    this->ofs<<elem.first<<":"<<std::atof(elem.second.c_str())*100/sum<<"% ";
+                if (!strcmp(elem.first.c_str(), "FeatureInit") || !strcmp(elem.first.c_str(), "Prediction")) {
+                    this->ofs<<elem.first<<":"<<std::atof(elem.second.c_str())*100/sum<<"% "<<std::endl;
                 }
             }
         );
@@ -115,6 +115,8 @@ public:
 
     std::ofstream& OFS(){return ofs;}//TODO: This is horrible
 
+    std::map<std::string, std::string> GetInfoMap() {return infoMap;}
+    std::map<std::string, std::string> GetInfoMapGlobal() {return infoMapGlobal;}
 
     ~InfoLog() {ofs.close();}
 

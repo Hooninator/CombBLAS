@@ -40,7 +40,7 @@ public:
 #ifdef PROFILE
         std::string matnameA = ExtractMatName(matpathA);
         std::string matnameB = ExtractMatName(matpathA);
-        infoPtr = new InfoLog("info-"+matnameA+"x"+matnameB+".out", autotuning::rank);
+        infoPtr = new InfoLog("info-"+matnameA+"x"+matnameB+"-"+std::to_string(autotuning::rank)+".out", autotuning::rank);
 #endif
 
 #ifdef PROFILE
@@ -116,7 +116,7 @@ public:
 #ifdef PROFILE
         std::string matnameA = ExtractMatName(matpathA);
         std::string matnameB = ExtractMatName(matpathA);
-        infoPtr = new InfoLog("info-"+matnameA+"x"+matnameB+".out", autotuning::rank);
+        infoPtr = new InfoLog("info-"+matnameA+"x"+matnameB+"-"+std::to_string(autotuning::rank)+".out", autotuning::rank);
 #endif
 
 #ifdef PROFILE

@@ -11,12 +11,13 @@
 #include "CombBLAS/Autotuning/Autotuner.h"
 
 #define ATIMING
+#define THREADED
 
 using namespace combblas;
 
 int main(int argc, char ** argv) {
     
-    /* ./<binary> <path/to/mat> */
+    /* ./<binary> <path/to/matA> <path/to/matB> <permute>*/
     
     assert(argc>3);
     
@@ -40,6 +41,7 @@ int main(int argc, char ** argv) {
     typedef int64_t IT;
     typedef double UT;
     typedef SpDCCols<IT,UT> DER;
+    typedef PlusTimesSRing<UT,UT> PTTF;
 
     SpParMat<IT,UT,DER> A(grid);
     SpParMat<IT,UT,DER> B(grid);
@@ -54,7 +56,9 @@ int main(int argc, char ** argv) {
     }
 
     
-    auto resultParams = tuner.TuneSpGEMM2D(A, B, autotuning::BRUTE_FORCE, matpathA, matpathB);
+    auto resultParams = tuner.TuneSpGEMM2DPhase(A, B, matpathA, matpathB);
+
+    Mult_AnXBn_Synch<PTTF, UT, DER>(A,B,false,false);
     
     autotuning::Finalize();
 
