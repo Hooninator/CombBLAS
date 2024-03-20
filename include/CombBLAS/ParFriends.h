@@ -2056,12 +2056,18 @@ SpParMat<IU, NUO, UDERO> Mult_AnXBn_Synch
         timingsMap->emplace("merge", std::to_string(mergeTime));
         timingsMap->emplace("local-mult", std::to_string(localMultTime));
     }
-    double buf[] = {bcastATime, bcastBTime};
-    MPI_Allreduce(MPI_IN_PLACE, (void*)(buf), 2, MPI_DOUBLE, MPI_MAX, A.getcommgrid()->GetWorld());
+    /*
+    double buf[] = {bcastATime, bcastBTime, mergeTime, localMultTime,0.0 };
+    buf[4] = std::accumulate(std::begin(buf), std::end(buf)-1, 0);
+    MPI_Allreduce(MPI_IN_PLACE, (void*)(buf), 5, MPI_DOUBLE, MPI_MAX, A.getcommgrid()->GetWorld());
     if (myrank==0) {
         fprintf(stdout, "[BcastA]: %lf\n", buf[0]);
         fprintf(stdout, "[BcastB]: %lf\n", buf[1]);
+        fprintf(stdout, "[Merge]: %lf\n", buf[2]);
+        fprintf(stdout, "[Mult]: %lf\n", buf[3]);
+        fprintf(stdout, "[Total]: %lf\n", buf[4]);
     }
+    */
 #endif
 
 	return SpParMat<IU,NUO,UDERO> (C, GridC);		// return the result object
@@ -2347,6 +2353,9 @@ void ComputeProblemStats(SpParMat<IU,NU1,UDERA> & A, SpParMat<IU,NU2,UDERB> & B,
     int Aself = (A.commGrid)->GetRankInProcRow();
     int Bself = (B.commGrid)->GetRankInProcCol();
     
+    double bcastTime = 0;
+    double flopTime = 0;
+    double nnzTime =0 ;
     
     for(int i = 0; i < stages; ++i)
     {
