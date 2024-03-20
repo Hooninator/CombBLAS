@@ -847,19 +847,14 @@ IT EstimateLocalFLOP
         numThreads = omp_get_num_threads();
     }
 #endif
-    //IT* flopC = estimateFLOP(A, B);
-    //IT* flopptr = prefixsum<IT>(flopC, Bdcsc->nzc, numThreads);
-    //IT flop = flopptr[Bdcsc->nzc];
-    //delete [] flopC;
-    IT flop = estimateFLOPFast(A,B);
+    IT flopC = estimateFLOPFast(A, B);
 
     if(clearA)
         delete const_cast<SpDCCols<IT, NT1> *>(&A);
     if(clearB)
         delete const_cast<SpDCCols<IT, NT2> *>(&B);
     
-    //delete [] flopptr;
-    return flop;
+    return flopC;
 }
 
 // estimate space for result of SpGEMM
@@ -975,6 +970,109 @@ IT* estimateNNZ(const SpDCCols<IT, NT1> & A,const SpDCCols<IT, NT2> & B, IT * au
     return colnnzC;
 }
 
+// estimate space for result of SpGEMM, but just return the sum
+template <typename IT, typename NT1, typename NT2>
+IT estimateNNZFast(const SpDCCols<IT, NT1> & A,const SpDCCols<IT, NT2> & B, IT * aux = nullptr, bool freeaux = true)
+{
+    IT nnzA = A.getnnz();
+    if(A.isZero() || B.isZero())
+    {
+        return 0;
+    }
+    
+    Dcsc<IT,NT1>* Adcsc = A.GetDCSC();
+    Dcsc<IT,NT2>* Bdcsc = B.GetDCSC();
+    
+    float cf  = static_cast<float>(A.getncol()+1) / static_cast<float>(Adcsc->nzc);
+    IT csize = static_cast<IT>(ceil(cf));   // chunk size
+    if(aux == nullptr)
+    {
+	    Adcsc->ConstructAux(A.getncol(), aux);
+    }
+	
+	
+    int numThreads = 1;
+#ifdef THREADED
+#pragma omp parallel
+    {
+        numThreads = omp_get_num_threads();
+    }
+#endif
+    
+
+    IT nnzC = 0;
+	
+    // thread private space for heap and colinds
+    std::vector<std::vector< std::pair<IT,IT>>> colindsVec(numThreads);
+    std::vector<std::vector<std::pair<IT,IT>>> globalheapVec(numThreads);
+	
+    for(int i=0; i<numThreads; i++) //inital allocation per thread, may be an overestimate, but does not require more memoty than inputs
+    {
+        colindsVec[i].resize(nnzA/numThreads);
+        globalheapVec[i].resize(nnzA/numThreads);
+    }
+
+#ifdef THREADED
+#pragma omp parallel for reduction(+:nnzC)
+#endif
+    for(int i=0; i < Bdcsc->nzc; ++i)
+    {
+        size_t nnzcolB = Bdcsc->cp[i+1] - Bdcsc->cp[i]; //nnz in the current column of B
+		int myThread = 0;
+#ifdef THREADED
+        myThread = omp_get_thread_num();
+#endif
+        if(colindsVec[myThread].size() < nnzcolB) //resize thread private vectors if needed
+        {
+            colindsVec[myThread].resize(nnzcolB);
+            globalheapVec[myThread].resize(nnzcolB);
+        }
+		
+        // colinds.first vector keeps indices to A.cp, i.e. it dereferences "colnums" vector (above),
+        // colinds.second vector keeps the end indices (i.e. it gives the index to the last valid element of A.cpnack)
+        Adcsc->FillColInds(Bdcsc->ir + Bdcsc->cp[i], nnzcolB, colindsVec[myThread], aux, csize);
+        std::pair<IT,IT> * colinds = colindsVec[myThread].data();
+        std::pair<IT,IT> * curheap = globalheapVec[myThread].data();
+        IT hsize = 0;
+        
+        // create the initial heap
+        for(IT j = 0; (unsigned)j < nnzcolB; ++j)
+        {
+            if(colinds[j].first != colinds[j].second)
+            {
+                curheap[hsize++] = std::make_pair(Adcsc->ir[colinds[j].first], j);
+            }
+        }
+        std::make_heap(curheap, curheap+hsize, std::greater<std::pair<IT,IT>>());
+        
+        IT prevRow=-1; // previously popped row from heap
+		
+        while(hsize > 0)
+        {
+          std::pop_heap(curheap, curheap + hsize, std::greater<std::pair<IT,IT>>()); // result is stored in wset[hsize-1]
+            IT locb = curheap[hsize-1].second;
+            
+            if( curheap[hsize-1].first != prevRow)
+            {
+                prevRow = curheap[hsize-1].first;
+                nnzC+=1;
+            }
+            
+            if( (++(colinds[locb].first)) != colinds[locb].second)	// current != end
+            {
+                curheap[hsize-1].first = Adcsc->ir[colinds[locb].first];
+                std::push_heap(curheap, curheap+hsize, std::greater<std::pair<IT,IT>>());
+            }
+            else
+            {
+                --hsize;
+            }
+        }
+    }
+    
+    if (freeaux) delete [] aux;
+    return nnzC;
+}
 
 // estimate space for result of SpGEMM with Hash
 template <typename IT, typename NT1, typename NT2>

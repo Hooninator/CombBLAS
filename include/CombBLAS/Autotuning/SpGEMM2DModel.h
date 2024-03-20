@@ -975,41 +975,10 @@ public:
         {
 
 #ifdef PROFILE
-            infoPtr->StartTimerGlobal("FLOPEstimation");
+            infoPtr->StartTimerGlobal("FeatureInit");
 #endif
 
-            EstimateFLOP<PTTF, AIT, ANT, BNT, ADER, BDER>(A,B,false,false,&FLOPS);
-
-#ifdef PROFILE
-            infoPtr->EndTimerGlobal("FLOPEstimation");
-#endif
-
-#ifdef PROFILE
-            infoPtr->StartTimerGlobal("NnzIntermediate");
-#endif
-			AIT * flopC = estimateFLOP(*(A.seqptr()), *(B.seqptr())); 
- 
-			if (!(A.seqptr()->isZero()) && !(B.seqptr()->isZero())) {
-                AIT * outputNnzCol = estimateNNZ_Hash(*(A.seqptr()), *(B.seqptr()), flopC);
-				for (int i=0; i<B.seqptr()->GetDCSC()->nzc; i++)
-				{
-					outputNnzIntermediate += outputNnzCol[i];
-				}
-			}
-            
-#ifdef PROFILE
-            infoPtr->EndTimerGlobal("NnzIntermediate");
-#endif
-
-#ifdef PROFILE
-            infoPtr->StartTimerGlobal("NnzFinal");
-#endif
-
-            outputNnzFinal = EstPerProcessNnzSUMMAMax(A,B,false);
-
-#ifdef PROFILE
-            infoPtr->EndTimerGlobal("NnzFinal");
-#endif
+            ComputeProblemStats(A,B,&outputNnzFinal,&outputNnzIntermediate,&FLOPS);
 
             std::vector<float> sendBuf{(const float)FLOPS, 
                                         (const float)Ainfo.locNrowsExact,
@@ -1028,6 +997,10 @@ public:
             // We do an allgather here because I think we'll need to distribute the search space at some point
             MPI_Allgather((void*)(sendBuf.data()), sendBuf.size(), MPI_FLOAT, (void*)(globalFeatures.data()),
                         sendBuf.size(), MPI_FLOAT, Ainfo.gridComm);
+
+#ifdef PROFILE
+            infoPtr->EndTimerGlobal("FeatureInit");
+#endif
         
         }
 

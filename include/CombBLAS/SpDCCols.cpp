@@ -110,6 +110,7 @@ SpDCCols<IT,NT>::SpDCCols(const SpTuples<IT, NT> & rhs, bool transpose)
 : m(rhs.m), n(rhs.n), nnz(rhs.nnz), splits(0)
 {	 
 	
+
 	if(nnz == 0)	// m by n matrix of complete zeros
 	{
 		if(transpose) std::swap(m,n);
@@ -119,7 +120,7 @@ SpDCCols<IT,NT>::SpDCCols(const SpTuples<IT, NT> & rhs, bool transpose)
 	{
 		if(transpose)
 		{
-      std::swap(m,n);
+            std::swap(m,n);
 			IT localnzc = 1;
 			for(IT i=1; i< rhs.nnz; ++i)
 			{

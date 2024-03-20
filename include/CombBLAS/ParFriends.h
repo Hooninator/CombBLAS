@@ -374,7 +374,7 @@ IU EstimateFLOP
             IU * localFLOPS=nullptr)
 
 {
-    int myrank;
+	int myrank;
     MPI_Comm_rank(MPI_COMM_WORLD,&myrank);
 	int stages, dummy; 	// last two parameters of ProductGrid are ignored for Synch multiplication
 	std::shared_ptr<CommGrid> GridC = ProductGrid((A.commGrid).get(), (B.commGrid).get(), stages, dummy, dummy);		
@@ -397,6 +397,9 @@ IU EstimateFLOP
 	int Aself = (A.commGrid)->GetRankInProcRow();
 	int Bself = (B.commGrid)->GetRankInProcCol();	
 	
+    double t0, t1;
+    double bcastTime = 0;
+    double flopCountTime = 0;
     
 	for(int i = 0; i < stages; ++i) 
 	{
@@ -414,11 +417,17 @@ IU EstimateFLOP
 			}
 			ARecv = new UDERA();				// first, create the object
 		}
-        
+#ifdef TIMING
+        t0 = MPI_Wtime();
+#endif
         
 		SpParHelper::BCastMatrix(GridC->GetRowWorld(), *ARecv, ess, i);	// then, receive its elements
 		ess.clear();
 
+#ifdef TIMING
+        t1 = MPI_Wtime();
+        bcastTime += (t1-t0);
+#endif
 		
 		if(i == Bself)
 		{
@@ -434,15 +443,31 @@ IU EstimateFLOP
 			BRecv = new UDERB();
 		}
 
+#ifdef TIMING
+        t0 = MPI_Wtime();
+#endif
         
 		SpParHelper::BCastMatrix(GridC->GetColWorld(), *BRecv, ess, i);	// then, receive its elements
 
+#ifdef TIMING
+        t1 = MPI_Wtime();
+        bcastTime += (t1-t0);
+#endif
 
-        if (ARecv->getnnz()!=0 && BRecv->getnnz()!=0)
+        if (ARecv->getnnz()!=0 && BRecv->getnnz()!=0) {
+
+#ifdef TIMING
+            t0 = MPI_Wtime();
+#endif
             local_flops += EstimateLocalFLOP<SR>
                             (*ARecv, *BRecv, // parameters themselves
                             i != Aself, 	// 'delete A' condition
                             i != Bself);	// 'delete B' condition
+#ifdef TIMING
+            t1 = MPI_Wtime();
+            flopCountTime += (t1-t0);
+#endif
+        }
 	}
     
 
@@ -462,7 +487,18 @@ IU EstimateFLOP
 	//if(!clearB)
 	//	const_cast< UDERB* >(B.spSeq)->Transpose();	// transpose back to original
     
+
     if (localFLOPS!=nullptr)  *localFLOPS = local_flops;
+
+#ifdef TIMING
+    double sendBuf[] = {flopCountTime, bcastTime};
+    double recvBuf[2]; 
+    MPI_Reduce((void*)(sendBuf),  (void*)(recvBuf), 2, MPI_DOUBLE, MPI_MAX, 0, A.getcommgrid()->GetWorld());
+    if (myrank==0) {
+        fprintf(stdout, "[FLOP Counting]: %lfs\n", recvBuf[0]);
+        fprintf(stdout, "[FLOP BCast Time]: %lfs\n", recvBuf[1]);
+    }
+#endif
 
     IU global_flops = 0;
     MPI_Allreduce(&local_flops, &global_flops, 1, MPI_LONG_LONG_INT, MPI_SUM, A.getcommgrid()->GetWorld());
@@ -2014,10 +2050,18 @@ SpParMat<IU, NUO, UDERO> Mult_AnXBn_Synch
 	//	const_cast< UDERB* >(B.spSeq)->Transpose();	// transpose back to original
 
 #ifdef TIMING
-    timingsMap->emplace("bcast-A", std::to_string(bcastATime));
-    timingsMap->emplace("bcast-B", std::to_string(bcastBTime));
-    timingsMap->emplace("merge", std::to_string(mergeTime));
-    timingsMap->emplace("local-mult", std::to_string(localMultTime));
+    if (timingsMap!=nullptr) {
+        timingsMap->emplace("bcast-A", std::to_string(bcastATime));
+        timingsMap->emplace("bcast-B", std::to_string(bcastBTime));
+        timingsMap->emplace("merge", std::to_string(mergeTime));
+        timingsMap->emplace("local-mult", std::to_string(localMultTime));
+    }
+    double buf[] = {bcastATime, bcastBTime};
+    MPI_Allreduce(MPI_IN_PLACE, (void*)(buf), 2, MPI_DOUBLE, MPI_MAX, A.getcommgrid()->GetWorld());
+    if (myrank==0) {
+        fprintf(stdout, "[BcastA]: %lf\n", buf[0]);
+        fprintf(stdout, "[BcastB]: %lf\n", buf[1]);
+    }
 #endif
 
 	return SpParMat<IU,NUO,UDERO> (C, GridC);		// return the result object
@@ -2265,122 +2309,101 @@ int64_t EstPerProcessNnzSUMMA(SpParMat<IU,NU1,UDERA> & A, SpParMat<IU,NU2,UDERB>
     
 
 /**
-  * Estimate the maximum nnz needed to store in a process from all stages of SUMMA before reduction
-  * @pre { Input matrices, A and B, should not alias }
+  * Compute Nnz in local output, max nnz in local output, and local FLOPS
   **/
 template <typename IU, typename NU1, typename NU2, typename UDERA, typename UDERB>
-int64_t EstPerProcessNnzSUMMAMax(SpParMat<IU,NU1,UDERA> & A, SpParMat<IU,NU2,UDERB> & B, bool hashEstimate)  
+void ComputeProblemStats(SpParMat<IU,NU1,UDERA> & A, SpParMat<IU,NU2,UDERB> & B, int64_t * nnzC_SUMMA, int64_t * nnzC_local, int64_t * FLOPS_local)  
 {
-    	typedef typename UDERA::LocalIT LIA;
-    	typedef typename UDERB::LocalIT LIB;
-        static_assert(std::is_same<LIA, LIB>::value, "local index types for both input matrices should be the same");
+    typedef typename UDERA::LocalIT LIA;
+    typedef typename UDERB::LocalIT LIB;
+    static_assert(std::is_same<LIA, LIB>::value, "local index types for both input matrices should be the same");
 
-        double t0, t1;
+    double t0, t1;
 
-        int64_t nnzC_SUMMA = 0;
-        
-        if(A.getncol() != B.getnrow())
+    if(A.getncol() != B.getnrow())
+    {
+        std::ostringstream outs;
+        outs << "Can not multiply, dimensions does not match"<< std::endl;
+        outs << A.getncol() << " != " << B.getnrow() << std::endl;
+        SpParHelper::Print(outs.str());
+        MPI_Abort(MPI_COMM_WORLD, DIMMISMATCH);
+        return;
+    }
+   
+    int stages, dummy;     // last two parameters of ProductGrid are ignored for Synch multiplication
+    std::shared_ptr<CommGrid> GridC = ProductGrid((A.commGrid).get(), (B.commGrid).get(), stages, dummy, dummy);
+
+    MPI_Barrier(GridC->GetWorld());
+    
+    LIA ** ARecvSizes = SpHelper::allocate2D<LIA>(UDERA::esscount, stages);
+    LIB ** BRecvSizes = SpHelper::allocate2D<LIB>(UDERB::esscount, stages);
+    SpParHelper::GetSetSizes( *(A.spSeq), ARecvSizes, (A.commGrid)->GetRowWorld());
+    SpParHelper::GetSetSizes( *(B.spSeq), BRecvSizes, (B.commGrid)->GetColWorld());
+    
+    // Remotely fetched matrices are stored as pointers
+    UDERA * ARecv;
+    UDERB * BRecv;
+
+    int Aself = (A.commGrid)->GetRankInProcRow();
+    int Bself = (B.commGrid)->GetRankInProcCol();
+    
+    
+    for(int i = 0; i < stages; ++i)
+    {
+        std::vector<LIA> ess;
+        if(i == Aself)
         {
-            std::ostringstream outs;
-            outs << "Can not multiply, dimensions does not match"<< std::endl;
-            outs << A.getncol() << " != " << B.getnrow() << std::endl;
-            SpParHelper::Print(outs.str());
-            MPI_Abort(MPI_COMM_WORLD, DIMMISMATCH);
-            return nnzC_SUMMA;
+            ARecv = A.spSeq;    // shallow-copy
         }
-       
-        int stages, dummy;     // last two parameters of ProductGrid are ignored for Synch multiplication
-        std::shared_ptr<CommGrid> GridC = ProductGrid((A.commGrid).get(), (B.commGrid).get(), stages, dummy, dummy);
-  
-        MPI_Barrier(GridC->GetWorld());
-        
-        LIA ** ARecvSizes = SpHelper::allocate2D<LIA>(UDERA::esscount, stages);
-        LIB ** BRecvSizes = SpHelper::allocate2D<LIB>(UDERB::esscount, stages);
-        SpParHelper::GetSetSizes( *(A.spSeq), ARecvSizes, (A.commGrid)->GetRowWorld());
-        SpParHelper::GetSetSizes( *(B.spSeq), BRecvSizes, (B.commGrid)->GetColWorld());
-        
-        // Remotely fetched matrices are stored as pointers
-        UDERA * ARecv;
-        UDERB * BRecv;
-
-        int Aself = (A.commGrid)->GetRankInProcRow();
-        int Bself = (B.commGrid)->GetRankInProcCol();
-        
-        
-        for(int i = 0; i < stages; ++i)
+        else
         {
-            std::vector<LIA> ess;
-            if(i == Aself)
+            ess.resize(UDERA::esscount);
+            for(int j=0; j< UDERA::esscount; ++j)
             {
-                ARecv = A.spSeq;    // shallow-copy
+                ess[j] = ARecvSizes[j][i];        // essentials of the ith matrix in this row
             }
-            else
+            ARecv = new UDERA();                // first, create the object
+        }
+
+        SpParHelper::BCastMatrix(GridC->GetRowWorld(), *ARecv, ess, i);    // then, receive its elements
+        ess.clear();
+        
+        if(i == Bself)
+        {
+            BRecv = B.spSeq;    // shallow-copy
+        }
+        else
+        {
+            ess.resize(UDERB::esscount);
+            for(int j=0; j< UDERB::esscount; ++j)
             {
-                ess.resize(UDERA::esscount);
-                for(int j=0; j< UDERA::esscount; ++j)
-                {
-                    ess[j] = ARecvSizes[j][i];        // essentials of the ith matrix in this row
-                }
-                ARecv = new UDERA();                // first, create the object
+                ess[j] = BRecvSizes[j][i];
             }
+            BRecv = new UDERB();
+        }
 
-            SpParHelper::BCastMatrix(GridC->GetRowWorld(), *ARecv, ess, i);    // then, receive its elements
-            ess.clear();
-            
-            if(i == Bself)
-            {
-                BRecv = B.spSeq;    // shallow-copy
-            }
-            else
-            {
-                ess.resize(UDERB::esscount);
-                for(int j=0; j< UDERB::esscount; ++j)
-                {
-                    ess[j] = BRecvSizes[j][i];
-                }
-                BRecv = new UDERB();
-            }
+        SpParHelper::BCastMatrix(GridC->GetColWorld(), *BRecv, ess, i);    // then, receive its elements
 
-            SpParHelper::BCastMatrix(GridC->GetColWorld(), *BRecv, ess, i);    // then, receive its elements
-            
-    	    // no need to keep entries of colnnzC in larger precision 
-	        // because colnnzC is of length nzc and estimates nnzs per column
-			// @OGUZ-EDIT Using hash spgemm for estimation
-            //LIB * colnnzC = estimateNNZ(*ARecv, *BRecv);
-            
-            if (BRecv->isZero() || ARecv->isZero()) continue;
+        if (BRecv->isZero() || ARecv->isZero()) continue;
+        
+        LIB nnzC = estimateNNZFast(*ARecv, *BRecv);
+        *nnzC_SUMMA = std::max(nnzC, *nnzC_SUMMA);
+        *FLOPS_local += estimateFLOPFast(*ARecv, *BRecv);
 
-			LIB* flopC = estimateFLOP(*ARecv, *BRecv);
-			LIB* colnnzC = estimateNNZ_Hash(*ARecv, *BRecv, flopC);
-            LIB nzc = BRecv->GetDCSC()->nzc;
-
-            int64_t currNnz = 0;
-#ifdef THREADED
-            #pragma omp parallel for
-#endif
-            for (int i=0; i<nzc; i++) 
-            {
-                currNnz += colnnzC[i];
-            }
-
-            nnzC_SUMMA = std::max(currNnz, nnzC_SUMMA);
-
-
-            if (flopC) delete [] flopC;
-            if(colnnzC) delete [] colnnzC;
-
-            
-            // delete received data
-            if(i != Aself)
-                delete ARecv;
-            if(i != Bself)
-                delete BRecv;
+        if (i==Aself && i==Bself) {
+            *nnzC_local = nnzC;
         }
         
-        SpHelper::deallocate2D(ARecvSizes, UDERA::esscount);
-        SpHelper::deallocate2D(BRecvSizes, UDERB::esscount);
+        // delete received data
+        if(i != Aself)
+            delete ARecv;
+        if(i != Bself)
+            delete BRecv;
+    }
         
-        return nnzC_SUMMA;
+    SpHelper::deallocate2D(ARecvSizes, UDERA::esscount);
+    SpHelper::deallocate2D(BRecvSizes, UDERB::esscount);
+        
 }
 
     
