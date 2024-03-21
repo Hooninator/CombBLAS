@@ -911,8 +911,8 @@ public:
         XGB_CHECK(XGBoosterCreate(nullptr, 0, &mergeBstHandle));
 
         //TODO: Remove hardocded filepaths
-        const char * multModelPath = "../include/CombBLAS/Autotuning/model/models/xgb-mult.model";
-        const char * mergeModelPath = "../include/CombBLAS/Autotuning/model/models/xgb-merge.model";
+        const char * multModelPath = "../include/CombBLAS/Autotuning/model/models/xgb-mult-best.model";
+        const char * mergeModelPath = "../include/CombBLAS/Autotuning/model/models/xgb-merge-best.model";
         
         XGB_CHECK(XGBoosterLoadModel(multBstHandle, multModelPath));
         XGB_CHECK(XGBoosterLoadModel(mergeBstHandle, mergeModelPath));
@@ -1165,6 +1165,9 @@ public:
         std::transform(searchSpace.begin(), searchSpace.end(), times.begin(),
             [&inputs, this](auto& params) {
 
+#ifdef DEBUG
+                debugPtr->Print(params.OutStr());
+#endif
                 auto featureMat = this->MakeFeatureMatImpl(inputs, params);
 
                 DMatrixHandle featureMatHandle;
@@ -1210,9 +1213,6 @@ public:
     std::vector<float> MakeFeatureMatImpl(Inputs<AIT,ANT,ADER, BIT,BNT,BDER>& inputs,
                                             SpGEMMParams& params) {
 
-#ifdef DEBUG
-        debugPtr->Print0(params.OutStr());
-#endif
 
 #ifdef PROFILE
         infoPtr->StartTimer("FeatureCollection");
@@ -1277,7 +1277,6 @@ public:
         debugPtr->LogVecSameLine(featureMat, "FeatureMat");
 #endif
 
-        MPI_Barrier(Ainfo.gridComm);
 
         return featureMat;
 

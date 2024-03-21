@@ -154,21 +154,45 @@ public:
 #endif
 
         //TODO: This makes this routine not generic since not all problems will have a 'searchspace2d' function
-        auto searchSpace = P::ConstructSearchSpace2D(platformParams, jobPtr->nodes, jobPtr->tasksPerNode);
-        ASSERT(searchSpace.size()>0, "Search space is of size 0!");
+        std::vector<P> searchSpace = P::ConstructSearchSpace2D(platformParams, jobPtr->nodes, jobPtr->tasksPerNode);
+
+        std::vector<P> localSpace;
+        std::vector<int> recvCounts(autotuning::worldSize);
+        int partitionSize = std::max(1, (int)(searchSpace.size() / autotuning::worldSize));
+        for (int i=0; i<searchSpace.size(); i++) {
+            int target = std::min(i / partitionSize, autotuning::worldSize);
+            if (target==autotuning::rank) {
+                localSpace.push_back(searchSpace[i]);
+            }
+            recvCounts[target] += 1;
+        }
+        
+        std::vector<int> displs(autotuning::worldSize);
+        for (int i=1; i<displs.size(); i++) {
+            displs[i] = displs[i-1] + recvCounts[i-1];
+        }
+
+
+        ASSERT(searchSpace.size()>0, "Global search space is of size 0!");
 
 #ifdef PROFILE
         infoPtr->PutGlobal("SearchSpaceSize", std::to_string(searchSpace.size()));
+        infoPtr->PutGlobal("LocalSearchSpaceSize", std::to_string(localSpace.size()));
 #endif
 
-        P bestParams;  
+        std::vector<float> localPredictions = model.Predict(inputs, localSpace);
 
-        std::vector<float> predictions = model.Predict(inputs, searchSpace);
+        std::vector<float> predictions(searchSpace.size());
+        MPI_Allgatherv((void*)(localPredictions.data()), localPredictions.size(), MPI_FLOAT,
+                        (void*)(predictions.data()), recvCounts.data(), displs.data(),
+                        MPI_FLOAT, MPI_COMM_WORLD); //TODO: Make an autotuning::commWorld and use that here
+
 
 #ifdef DEBUG
         debugPtr->Print0("Searching for min");
 #endif
 
+        P bestParams;  
         bestParams = searchSpace[std::distance(predictions.begin(), std::min_element(predictions.begin(), predictions.end()))];
 
 #ifdef PROFILE

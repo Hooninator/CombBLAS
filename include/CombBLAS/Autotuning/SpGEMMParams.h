@@ -49,7 +49,7 @@ public:
     static std::vector<SpGEMMParams> ConstructSearchSpace3D(PlatformParams& params) {
         std::vector<SpGEMMParams> result;
         for (int _nodes = 1; _nodes<=jobPtr->nodes; _nodes*=2) {
-            for (int _ppn=1; _ppn<=jobPtr->tasksPerNode; _ppn*=2) {
+            for (int _ppn=1; _ppn<=params.GetCoresPerNode(); _ppn*=2) {
                 if (IsPerfectSquare(_ppn*_nodes)) {
                     for (int _layers=1; _layers<=_ppn*_nodes; _layers*=2) {
                         int gridSize = (_ppn*_nodes) / _layers;
@@ -65,15 +65,17 @@ public:
 
     static std::vector<SpGEMMParams> ConstructSearchSpace2D(PlatformParams& params, int nodeLimit,
                                                             int tasksPerNode) {
-        std::vector<SpGEMMParams> result;
+        std::vector<SpGEMMParams> space;
         for (int _nodes = 1; _nodes<=nodeLimit; _nodes*=2) {
             for (int _ppn=1; _ppn<=tasksPerNode; _ppn*=2) {
                 if (IsPerfectSquare(_ppn*_nodes)) {
-                    result.push_back(SpGEMMParams(_nodes,_ppn,1));
+                    space.push_back(SpGEMMParams(_nodes,_ppn,1));
                 }
             }
         }
-        return result;
+
+        return space;
+
     }
 
     /* Given a set of parameters, construct a 3D processor grid from a communicator that only contains the processes
