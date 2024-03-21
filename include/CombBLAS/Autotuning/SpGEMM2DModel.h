@@ -978,7 +978,9 @@ public:
             infoPtr->StartTimerGlobal("FeatureInit");
 #endif
 
-            ComputeProblemStats(A,B,&outputNnzFinal,&outputNnzIntermediate,&FLOPS);
+            //ComputeProblemStats(A,B,&outputNnzFinal,&outputNnzIntermediate,&FLOPS);
+            ComputeProblemStatsOneSided(A,B, &outputNnzFinal, &outputNnzIntermediate,
+                                        &FLOPS);
 
             std::vector<float> sendBuf{(const float)FLOPS, 
                                         (const float)Ainfo.locNrowsExact,
@@ -1138,6 +1140,200 @@ public:
 
 		}
 
+		
+		template <typename IU, typename NU1, typename NU2, typename UDERA, typename UDERB>
+		void ComputeProblemStatsOneSided(SpParMat<IU,NU1,UDERA> & A, 
+                                        SpParMat<IU,NU2,UDERB> & B, 
+                                        int64_t * nnzC_SUMMA, 
+                                        int64_t * nnzC_local, int64_t * FLOPS_local)
+		{
+			typedef typename UDERA::LocalIT LIA;
+			typedef typename UDERB::LocalIT LIB;
+			static_assert(std::is_same<LIA, LIB>::value, "local index types for both input matrices should be the same");
+
+			double t0, t1;
+
+			if(A.getncol() != B.getnrow())
+			{
+				std::ostringstream outs;
+				outs << "Can not multiply, dimensions does not match"<< std::endl;
+				outs << A.getncol() << " != " << B.getnrow() << std::endl;
+				SpParHelper::Print(outs.str());
+				MPI_Abort(MPI_COMM_WORLD, DIMMISMATCH);
+				return;
+			}
+
+			int stages, dummy;     
+			std::shared_ptr<CommGrid> GridC = ProductGrid((A.getcommgrid()).get(), 
+                    (B.getcommgrid()).get(), stages, dummy, dummy);
+
+			MPI_Barrier(GridC->GetWorld());
+
+			LIA ** ARecvSizes = SpHelper::allocate2D<LIA>(UDERA::esscount, stages);
+			LIB ** BRecvSizes = SpHelper::allocate2D<LIB>(UDERB::esscount, stages);
+			SpParHelper::GetSetSizes( *(A.seqptr()), ARecvSizes, 
+                    (A.getcommgrid())->GetRowWorld());
+			SpParHelper::GetSetSizes( *(B.seqptr()), BRecvSizes, 
+                    (B.getcommgrid())->GetColWorld());
+
+			// Remotely fetched matrices are stored as pointers
+			UDERA * ARecv;
+			UDERB * BRecv;
+
+			int Aself = (A.getcommgrid())->GetRankInProcRow();
+			int Bself = (B.getcommgrid())->GetRankInProcCol();
+
+
+            /* Create window objects */
+            auto arrInfoA = A.seqptr()->GetArrays();
+            auto arrInfoB = B.seqptr()->GetArrays();
+
+            std::vector<MPI_Win> arrwinA(arrInfoA.totalsize());
+            std::vector<MPI_Win> arrwinB(arrInfoB.totalsize());
+                
+            assert(arrInfoA.indarrs.size()==arrInfoB.indarrs.size());
+            
+            int arrIdx = 0;
+            for (int i=0; i<arrInfoA.indarrs.size(); i++) {
+                MPI_Win_create(arrInfoA.indarrs[i].addr, 
+                                arrInfoA.indarrs[i].count*sizeof(IU),
+                                sizeof(IU), MPI_INFO_NULL, //TODO: no locks
+                                A.getcommgrid()->GetRowWorld(),
+                                &(arrwinA[arrIdx]));
+                MPI_Win_create(arrInfoB.indarrs[i].addr, 
+                                arrInfoB.indarrs[i].count*sizeof(IU),
+                                sizeof(IU), MPI_INFO_NULL, //TODO: no locks
+                                B.getcommgrid()->GetColWorld(),
+                                &(arrwinB[arrIdx]));
+                MPI_Win_fence(MPI_MODE_NOPUT, (arrwinA[arrIdx]));
+                MPI_Win_fence(MPI_MODE_NOPUT, (arrwinB[arrIdx]));
+                arrIdx++;
+            }
+
+            assert(arrInfoA.numarrs.size()==arrInfoB.numarrs.size());
+
+            for (int i=0; i<arrInfoA.numarrs.size(); i++) {
+                MPI_Win_create(arrInfoA.numarrs[i].addr,
+                                arrInfoA.numarrs[i].count*sizeof(NU1),
+                                sizeof(NU1), MPI_INFO_NULL,
+                                A.getcommgrid()->GetRowWorld(),
+                                &(arrwinA[arrIdx]));
+                MPI_Win_create(arrInfoB.numarrs[i].addr,
+                                arrInfoB.numarrs[i].count*sizeof(NU2),
+                                sizeof(NU2), MPI_INFO_NULL,
+                                B.getcommgrid()->GetColWorld(),
+                                &(arrwinB[arrIdx]));
+                MPI_Win_fence(MPI_MODE_NOPUT, (arrwinA[arrIdx]));
+                MPI_Win_fence(MPI_MODE_NOPUT, (arrwinB[arrIdx]));
+                arrIdx++;
+            }
+
+
+			double fetchTime = 0;
+			double flopTime = 0;
+			double nnzTime = 0;
+
+			for(int i = 0; i < stages; ++i)
+			{
+				std::vector<LIA> ess;
+				if(i == Aself)
+				{
+					ARecv = A.seqptr();    // shallow-copy
+				}
+				else
+				{
+					ess.resize(UDERA::esscount);
+					for(int j=0; j< UDERA::esscount; ++j)
+					{
+						ess[j] = ARecvSizes[j][i];        // essentials of the ith matrix in this row
+					}
+					ARecv = new UDERA();                // first, create the object
+				}
+#ifdef PROFILE
+                t0 = MPI_Wtime();
+#endif
+
+                if (i!=Aself)
+                    SpParHelper::FetchMatrix(*ARecv, ess, arrwinA, i);
+#ifdef PROFILE
+                t1 = MPI_Wtime();
+                fetchTime += (t1-t0);
+#endif
+				ess.clear();
+
+				if(i == Bself)
+				{
+					BRecv = B.seqptr();    // shallow-copy
+				}
+				else	
+			    {
+					ess.resize(UDERB::esscount);
+					for(int j=0; j< UDERB::esscount; ++j)
+					{
+						ess[j] = BRecvSizes[j][i];
+					}
+					BRecv = new UDERB();
+				}
+
+#ifdef PROFILE
+                t0 = MPI_Wtime();
+#endif
+                if (i!=Bself)
+                    SpParHelper::FetchMatrix(*BRecv, ess, arrwinB, i); 
+
+#ifdef PROFILE
+                t1 = MPI_Wtime();
+                fetchTime += (t1-t0);
+#endif
+				if (BRecv->isZero() || ARecv->isZero()) continue;
+
+#ifdef PROFILE
+                t0 = MPI_Wtime();
+#endif
+				LIB nnzC = estimateNNZFast(*ARecv, *BRecv);
+#ifdef PROFILE
+                t1 = MPI_Wtime();
+                nnzTime += (t1-t0);
+#endif
+				*nnzC_SUMMA = std::max(nnzC, *nnzC_SUMMA);
+#ifdef PROFILE
+                t0 = MPI_Wtime();
+#endif
+				*FLOPS_local += estimateFLOPFast(*ARecv, *BRecv);
+#ifdef PROFILE
+                t1 = MPI_Wtime();
+                flopTime += (t1-t0);
+#endif
+
+				if (i==Aself && i==Bself) {
+					*nnzC_local = nnzC;
+				}
+
+				// delete received data
+				if(i != Aself)
+					delete ARecv;
+				if(i != Bself)
+					delete BRecv;
+			}
+
+			SpHelper::deallocate2D(ARecvSizes, UDERA::esscount);
+			SpHelper::deallocate2D(BRecvSizes, UDERB::esscount);
+
+            /* Free MPI RMA windows */
+            for (int i=0; i<arrwinA.size(); i++) {
+                MPI_Win_fence(0, arrwinA[i]);
+                MPI_Win_fence(0, arrwinB[i]);
+                MPI_Win_free(&arrwinA[i]);
+                MPI_Win_free(&arrwinB[i]);
+            }
+
+#ifdef PROFILE
+            infoPtr->PutGlobal("FeatureBcastTime", std::to_string(fetchTime));
+            infoPtr->PutGlobal("FeatureNnzInit", std::to_string(nnzTime));
+            infoPtr->PutGlobal("FeatureFLOPInit", std::to_string(flopTime));
+#endif
+
+		}
 		
 
         SpParMatInfoPhase<AIT,ANT,ADER> Ainfo;
