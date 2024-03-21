@@ -1328,7 +1328,7 @@ public:
             }
 
 #ifdef PROFILE
-            infoPtr->PutGlobal("FeatureBcastTime", std::to_string(fetchTime));
+            infoPtr->PutGlobal("FeatureFetchTime", std::to_string(fetchTime));
             infoPtr->PutGlobal("FeatureNnzInit", std::to_string(nnzTime));
             infoPtr->PutGlobal("FeatureFLOPInit", std::to_string(flopTime));
 #endif
