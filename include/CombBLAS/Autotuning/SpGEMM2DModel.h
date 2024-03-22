@@ -1183,6 +1183,10 @@ public:
 			int Aself = (A.getcommgrid())->GetRankInProcRow();
 			int Bself = (B.getcommgrid())->GetRankInProcCol();
 
+            MPI_Group rowGroup;
+            MPI_Group colGroup;
+            MPI_Comm_group(A.getcommgrid()->GetRowWorld(), &rowGroup);
+            MPI_Comm_group(B.getcommgrid()->GetColWorld(), &colGroup);
 
             /* Create window objects */
             auto arrInfoA = A.seqptr()->GetArrays();
@@ -1205,8 +1209,6 @@ public:
                                 sizeof(IU), MPI_INFO_NULL, //TODO: no locks
                                 B.getcommgrid()->GetColWorld(),
                                 &(arrwinB[arrIdx]));
-                MPI_Win_fence(MPI_MODE_NOPUT, (arrwinA[arrIdx]));
-                MPI_Win_fence(MPI_MODE_NOPUT, (arrwinB[arrIdx]));
                 arrIdx++;
             }
 
@@ -1223,8 +1225,6 @@ public:
                                 sizeof(NU2), MPI_INFO_NULL,
                                 B.getcommgrid()->GetColWorld(),
                                 &(arrwinB[arrIdx]));
-                MPI_Win_fence(MPI_MODE_NOPUT, (arrwinA[arrIdx]));
-                MPI_Win_fence(MPI_MODE_NOPUT, (arrwinB[arrIdx]));
                 arrIdx++;
             }
 
@@ -1233,54 +1233,27 @@ public:
 			double flopTime = 0;
 			double nnzTime = 0;
 
+
 			for(int i = 0; i < stages; ++i)
 			{
-				std::vector<LIA> ess;
-				if(i == Aself)
-				{
-					ARecv = A.seqptr();    // shallow-copy
-				}
-				else
-				{
-					ess.resize(UDERA::esscount);
-					for(int j=0; j< UDERA::esscount; ++j)
-					{
-						ess[j] = ARecvSizes[j][i];        // essentials of the ith matrix in this row
-					}
-					ARecv = new UDERA();                // first, create the object
-				}
 #ifdef PROFILE
                 t0 = MPI_Wtime();
 #endif
 
-                if (i!=Aself)
-                    SpParHelper::FetchMatrix(*ARecv, ess, arrwinA, i);
+                SpParHelper::LockNFetch(ARecv, i, arrwinA, rowGroup, ARecvSizes);
 #ifdef PROFILE
                 t1 = MPI_Wtime();
                 fetchTime += (t1-t0);
 #endif
-				ess.clear();
 
-				if(i == Bself)
-				{
-					BRecv = B.seqptr();    // shallow-copy
-				}
-				else	
-			    {
-					ess.resize(UDERB::esscount);
-					for(int j=0; j< UDERB::esscount; ++j)
-					{
-						ess[j] = BRecvSizes[j][i];
-					}
-					BRecv = new UDERB();
-				}
 
 #ifdef PROFILE
                 t0 = MPI_Wtime();
 #endif
-                if (i!=Bself)
-                    SpParHelper::FetchMatrix(*BRecv, ess, arrwinB, i); 
+                SpParHelper::LockNFetch(BRecv, i, arrwinB, colGroup, BRecvSizes);
 
+                SpParHelper::UnlockWindows(i, arrwinA);
+                SpParHelper::UnlockWindows(i, arrwinB);
 #ifdef PROFILE
                 t1 = MPI_Wtime();
                 fetchTime += (t1-t0);
@@ -1319,10 +1292,7 @@ public:
 			SpHelper::deallocate2D(ARecvSizes, UDERA::esscount);
 			SpHelper::deallocate2D(BRecvSizes, UDERB::esscount);
 
-            /* Free MPI RMA windows */
             for (int i=0; i<arrwinA.size(); i++) {
-                MPI_Win_fence(0, arrwinA[i]);
-                MPI_Win_fence(0, arrwinB[i]);
                 MPI_Win_free(&arrwinA[i]);
                 MPI_Win_free(&arrwinB[i]);
             }
