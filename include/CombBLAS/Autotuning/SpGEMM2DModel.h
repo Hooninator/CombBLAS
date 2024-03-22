@@ -1259,24 +1259,26 @@ public:
                 fetchTime += (t1-t0);
 #endif
 				if (BRecv->isZero() || ARecv->isZero()) continue;
+#ifdef PROFILE
+                t0 = MPI_Wtime();
+#endif
+                LIB flopC = 0;
+				LIB * colFlopC = estimateFLOP(*ARecv, *BRecv, &flopC);
+                *FLOPS_local += flopC;
+#ifdef PROFILE
+                t1 = MPI_Wtime();
+                flopTime += (t1-t0);
+#endif
 
 #ifdef PROFILE
                 t0 = MPI_Wtime();
 #endif
-				LIB nnzC = estimateNNZFast(*ARecv, *BRecv);
+				LIB nnzC = estimateNNZ_HashFast(*ARecv, *BRecv, colFlopC);
 #ifdef PROFILE
                 t1 = MPI_Wtime();
                 nnzTime += (t1-t0);
 #endif
 				*nnzC_SUMMA = std::max(nnzC, *nnzC_SUMMA);
-#ifdef PROFILE
-                t0 = MPI_Wtime();
-#endif
-				*FLOPS_local += estimateFLOPFast(*ARecv, *BRecv);
-#ifdef PROFILE
-                t1 = MPI_Wtime();
-                flopTime += (t1-t0);
-#endif
 
 				if (i==Aself && i==Bself) {
 					*nnzC_local = nnzC;
