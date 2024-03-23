@@ -992,6 +992,9 @@ public:
                                         (const float)outputNnzIntermediate, 
                                         (const float)outputNnzFinal,
                                         0.0, 0.0}; //These last two placeholders are where nodes and ppn will go
+#ifdef DEBUG
+            debugPtr->LogVecSameLine(sendBuf, "sendBuf");
+#endif
 
             globalFeatures.resize(sendBuf.size()*Ainfo.worldSize);
 
@@ -1232,7 +1235,11 @@ public:
 			double fetchTime = 0;
 			double flopTime = 0;
 			double nnzTime = 0;
+            
+            LIB flopCLocal = 0;
+            LIB * colFlopC = estimateFLOP(*(A.seqptr()), *(B.seqptr()), &flopCLocal);
 
+            *nnzC_local = estimateNNZ_HashFast(*(A.seqptr()), *(B.seqptr()), colFlopC);
 
 			for(int i = 0; i < stages; ++i)
 			{
@@ -1259,30 +1266,34 @@ public:
                 fetchTime += (t1-t0);
 #endif
 				if (BRecv->isZero() || ARecv->isZero()) continue;
+                
+                LIB nnzC;
+                if (i==Aself && i==Bself) {
+                    nnzC = *nnzC_local;
+                    *FLOPS_local += flopCLocal;
+                } else {
 #ifdef PROFILE
-                t0 = MPI_Wtime();
+                    t0 = MPI_Wtime();
 #endif
-                LIB flopC = 0;
-				LIB * colFlopC = estimateFLOP(*ARecv, *BRecv, &flopC);
-                *FLOPS_local += flopC;
+                    LIB flopC = 0;
+                    LIB * colFlopC = estimateFLOP(*ARecv, *BRecv, &flopC);
+                    *FLOPS_local += flopC;
 #ifdef PROFILE
-                t1 = MPI_Wtime();
-                flopTime += (t1-t0);
+                    t1 = MPI_Wtime();
+                    flopTime += (t1-t0);
 #endif
+#ifdef PROFILE
+                    t0 = MPI_Wtime();
+#endif
+                    nnzC = estimateNNZ_HashFast(*ARecv, *BRecv, colFlopC);
+#ifdef PROFILE
+                    t1 = MPI_Wtime();
+                    nnzTime += (t1-t0);
+#endif
+                }
 
-#ifdef PROFILE
-                t0 = MPI_Wtime();
-#endif
-				LIB nnzC = estimateNNZ_HashFast(*ARecv, *BRecv, colFlopC);
-#ifdef PROFILE
-                t1 = MPI_Wtime();
-                nnzTime += (t1-t0);
-#endif
 				*nnzC_SUMMA = std::max(nnzC, *nnzC_SUMMA);
 
-				if (i==Aself && i==Bself) {
-					*nnzC_local = nnzC;
-				}
 
 				// delete received data
 				if(i != Aself)
@@ -1401,10 +1412,6 @@ public:
             return ( (rowRank / superTileDim) ) + ( ((colRank) / superTileDim) * gridDim );
         };
 
-        auto SuperTileKey = [&gridDim, &superTileDim](int rowRank, int colRank) {
-            return ( ((rowRank ) % superTileDim) + ((colRank % superTileDim) * superTileDim ) );
-        };
-
         // Reduce into featureMat
         for (int k=0; k<Ainfo.worldSize; k++) {
 
@@ -1412,12 +1419,15 @@ public:
             int j = k / RoundedSqrt<int,int>(Ainfo.worldSize);
             
             int superTileIdx = SuperTileColor(i, j);
+#ifdef DEBUG
+            //debugPtr->Print("Rank " + std::to_string(k) + " mapped to " + std::to_string(superTileIdx));
+#endif
             
             int startIdx = superTileIdx*nFeatures;
             int endIdx = (superTileIdx+1)*nFeatures;
 
-            std::transform(inputs.globalFeatures.begin() + (i*nFeatures), 
-                            inputs.globalFeatures.begin() + ((i+1)*nFeatures),
+            std::transform(inputs.globalFeatures.begin() + (k*nFeatures), 
+                            inputs.globalFeatures.begin() + ((k+1)*nFeatures),
                             featureMat.begin() + superTileIdx*nFeatures,
                             featureMat.begin() + superTileIdx*nFeatures,
                             std::plus<>());
@@ -1429,12 +1439,11 @@ public:
             featureMat[k*nFeatures + (nFeatures-2)] = params.GetNodes();
             featureMat[k*nFeatures + (nFeatures-1)] = params.GetPPN();
 
-            //Solve overcounting the dimensions
-            //This is necessary until I can sit down and make this whole process less horrible
-            featureMat[k*nFeatures + 1] /= RoundedSqrt<int,int>(Ainfo.worldSize);
-            featureMat[k*nFeatures + 2] /= RoundedSqrt<int,int>(Ainfo.worldSize);
-            featureMat[k*nFeatures + 3] /= RoundedSqrt<int,int>(Ainfo.worldSize);
-            featureMat[k*nFeatures + 4] /= RoundedSqrt<int,int>(Ainfo.worldSize);
+            // I should be arrested for writing this
+            featureMat[k*nFeatures + 1] = (std::ceil(Ainfo.GetNrows() / gridDim));
+            featureMat[k*nFeatures + 2] = (std::ceil(Binfo.GetNrows() / gridDim));
+            featureMat[k*nFeatures + 3] = (std::ceil(Ainfo.GetNcols() / gridDim));
+            featureMat[k*nFeatures + 4] = (std::ceil(Binfo.GetNcols() / gridDim));
         }
 
 

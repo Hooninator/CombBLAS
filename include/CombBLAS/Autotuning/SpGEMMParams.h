@@ -67,8 +67,8 @@ public:
                                                             int tasksPerNode) {
         std::vector<SpGEMMParams> space;
         for (int _nodes = 1; _nodes<=nodeLimit; _nodes*=2) {
-            for (int _ppn=1; _ppn<=tasksPerNode; _ppn*=2) {
-                if (IsPerfectSquare(_ppn*_nodes)) {
+            for (int _ppn=2; _ppn<=tasksPerNode; _ppn*=2) {
+                if (IsPerfectSquare(_ppn*_nodes) && !(_ppn==2 && _nodes==2)) {
                     space.push_back(SpGEMMParams(_nodes,_ppn,1));
                 }
             }

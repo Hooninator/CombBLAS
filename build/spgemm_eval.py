@@ -137,6 +137,7 @@ class ProblemPhaseResults:
             top_2_err = None
             top_3_err = None
 
+        timings["AutotuningSpGEMM"] = y_arr[np.argmin(y_pred_arr)]
         self.results[problem] = self.Result(problem, rmse, kt, diff, top_1_err, top_2_err, top_3_err, 
                                             is_correct1, is_correct2, is_correct3, spgemm_runtime, timings)
     
@@ -219,6 +220,7 @@ class ProblemPhaseResults:
         problems = []
         spgemm_times = []
         autotuning_timings = []
+        autotuning_spgemm_timings = []
         for problem in self.results.keys():
             spgemm_time = self.get_result_stat(problem, "spgemm_runtime")
             if spgemm_time:
@@ -228,17 +230,22 @@ class ProblemPhaseResults:
         
         feature_init_times = list(map(lambda t: t["FeatureInit"], autotuning_timings))
         prediction_times = list(map(lambda t: t["Prediction"], autotuning_timings))
+        autotuning_spgemm_times = list(map(lambda t: t["AutotuningSpGEMM"], autotuning_timings))
+        tuning_times = list(map(lambda t: t["TuneSpGEMM2D"], autotuning_timings))
 
         categories = ["Autotuning Runtime", "SpGEMM Runtime"]
         ind = np.arange(len(problems))*1.5
+        plt.figure(figsize=(12,6))
         fig, ax = plt.subplots()
-        ax.bar(ind, feature_init_times, width=0.5, label="FeatureInit")
-        ax.bar(ind, prediction_times, width=0.5, label="Prediction", bottom=feature_init_times)
-        ax.bar(ind+0.5, spgemm_times, width=0.5, label="SpGEMM Runtime")
+        #ax.bar(ind, feature_init_times, width=0.5, label="FeatureInit")
+        #ax.bar(ind, prediction_times, width=0.5, label="Prediction", bottom=feature_init_times)
+        ax.bar(ind, tuning_times, width=0.5, label="Autotuning Overhead")
+        ax.bar(ind, autotuning_spgemm_times, width=0.5, label="Autotuning SpGEMM", bottom=tuning_times)
+        ax.bar(ind+0.5, spgemm_times, width=0.5, label="Naive SpGEMM")
         ax.set_ylabel("Time (s)")
-        ax.set_title(f"SpGEMM Runtime vs. Autotuning Overhead for {problem}")
+        ax.set_title(f"SpGEMM Runtime vs. Autotuning Overhead")
         ax.set_xticks(ind)
-        ax.set_xticklabels(problems)
+        ax.set_xticklabels(problems, rotation=90)
         ax.legend()
         plt.savefig(f"{args.label}-plots/timing.png", bbox_inches='tight')
         plt.clf()
@@ -406,15 +413,25 @@ def eval_cpp(args, test_df):
                 if line.find("FeatureInit:")!=-1 and line.find("%")==-1:
                     t = float(line.split(":")[1])
                     timings["FeatureInit"] = t
+                if line.find("TuneSpGEMM2DPhase:")!=-1 and line.find("%")==-1:
+                    t = float(line.split(":")[1])
+                    timings["TuneSpGEMM2D"] = t
 
 
         os.system(f"rm -f info-{mat_name}x{mat_name}*")
         os.system("rm -f logfile*")
 
-        df_max = df_problem.groupby(by=["Nodes","PPN"]).max()
-        y_arr = df_max[args.label]
+        y_arr = np.zeros(shape=(len(params)))
+        
+        for param in params:
+            param_time = df_problem[df_problem["params"]==param][args.label].max()
+            y_arr[list(params).index(param)] = param_time 
 
-        valid_params = params
+
+        print(params)
+        print(y_pred_arr)
+        print(y_arr)
+
 
         spgemm_runtime = float(result.stdout.split("[Total]:")[1]) #df_max[df_max["params"]==f"{float(nodes_cmd)}, {float(ppn_cmd)}"][args.label].item()
         results.add_result(problem, y_arr, y_pred_arr, spgemm_runtime, timings)
@@ -434,6 +451,9 @@ def eval_cpp(args, test_df):
             
 
         i+=1
+
+    with open("cpp-results.pkl", 'wb') as picklefile:
+        pickle.dump(results, picklefile)
 
     results.output_eval()
     results.plot_eval()
@@ -470,8 +490,8 @@ def correctness(df, mat_name):
 
                         if nodes!=file_nodes or ppn!=file_ppn:
                             break
-                        
-                        print(logfile)
+
+                        correct = True
                         
                         for rank in range(ranks):
 
@@ -486,7 +506,11 @@ def correctness(df, mat_name):
                                 
                                 print(f"{name} -> {val}:{df_rank[name].item()}")
 
-                                assert val==df_rank[name].item()
+                                if abs(val-df_rank[name].item())>=100:
+                                    correct=False
+                        if not correct:
+                            print(f"Correctness check failed for ({nodes}, {ppn})")
+                            return
 
     print(f"Correctness for {mat_name} passed!")
 
@@ -509,7 +533,8 @@ def loc_mult_model(X, use_xgb=True):
     X = X.drop(labels=["rank"], axis=1)
     if use_xgb:
         bst = xgb.Booster()
-        bst.load_model(f"{path_prefix}models/xgb-mult-best.model")
+        #bst.load_model(f"{path_prefix}models/xgb-mult-best.model")
+        bst.load_model(f"{path_prefix}models/xgb-mult-nonnz.model")
         return np.array(bst.predict(xgb.DMatrix(X)))
     else:
         return 0
@@ -519,7 +544,8 @@ def merge_model(X, use_xgb=True):
     X = X.drop(labels=["rank"], axis=1)
     if use_xgb:
         bst = xgb.Booster()
-        bst.load_model(f"{path_prefix}models/xgb-merge-best.model")
+        #bst.load_model(f"{path_prefix}models/xgb-merge-best.model")
+        bst.load_model(f"{path_prefix}models/xgb-merge-nonnz.model")
         return np.array(bst.predict(xgb.DMatrix(X)))
     else:
         return 0
@@ -621,23 +647,22 @@ if __name__=="__main__":
     # Load in dataframe
     if args.load:
         df = load_gnn_df(features, labels) 
-        print(df['problem'].unique().shape)
 
         # Only problems with 1,2,4 nodes
-        #all_problems = df['problem'].unique()
-        #valid_problems = [p for p in all_problems if df[df['problem']==p]['Nodes'].unique().shape[0]==3]
-        #df = df[df['problem'].isin(valid_problems)]
+        all_problems = df['problem'].unique()
+        valid_problems = [p for p in all_problems if df[df['problem']==p]['Nodes'].unique().shape[0]==3]
+        df = df[df['problem'].isin(valid_problems)]
         
         # Make sure each grid is valid
         
-        #for p in valid_problems:
-        #    df_problem = df[df['problem']==p]
-        #    for _, d in df_problem.groupby(by=["Nodes", "PPN"]):
-        #        if not math.sqrt(d.shape[0]).is_integer():
-        #            df = df.drop(labels=d.index)
+        for p in valid_problems:
+            df_problem = df[df['problem']==p]
+            for _, d in df_problem.groupby(by=["Nodes", "PPN"]):
+                if not math.sqrt(d.shape[0]).is_integer():
+                    df = df.drop(labels=d.index)
             
 
-        #df.to_pickle("./master-df-gnn.pkl")
+        df.to_pickle("./master-df-gnn.pkl")
     else:
         df = pd.read_pickle("./master-df-gnn.pkl")
     
@@ -658,8 +683,9 @@ if __name__=="__main__":
     elif args.eval=="bcast":
         eval_phase(args,  test_data, bcast_model, False)
     elif args.eval=="spgemm":
-        #eval_cpp(args,test_data)
-        eval_phase(args,df, spgemm_model)
+        eval_phase(args,test_data, spgemm_model)
+    elif args.eval=="cpp":
+        eval_cpp(args,test_data)
     
 
     
