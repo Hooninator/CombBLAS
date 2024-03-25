@@ -25,21 +25,23 @@ public:
     typedef NT nzType;
     typedef DER seqType;
 
+    SpParMatInfo(){}
+
     //NOTE: loc* are values for the actual 2D processor grid
     //distInfo determines if distribution-specific information, like the array of tile densities, is computed
-    SpParMatInfo(SpParMat3D<IT,NT,DER>& Mat):
+    SpParMatInfo(SpParMat3D<IT,NT,DER> * Mat):
         
-        locMat(Mat.seqptr()),
+        locMat(Mat->seqptr()),
 
-        locNnz(Mat.seqptr()->getnnz()), 
+        locNnz(Mat->seqptr()->getnnz()), 
 
-        locNcols(Mat.getncol() / RoundedSqrt<IT,IT>(worldSize)), 
-        locNrows(Mat.getnrow() / RoundedSqrt<IT,IT>(worldSize)),
-        locNcolsExact(Mat.seqptr()->getncol()),
-        locNrowsExact(Mat.seqptr()->getnrow()),
+        locNcols(Mat->getncol() / RoundedSqrt<IT,IT>(worldSize)), 
+        locNrows(Mat->getnrow() / RoundedSqrt<IT,IT>(worldSize)),
+        locNcolsExact(Mat->seqptr()->getncol()),
+        locNrowsExact(Mat->seqptr()->getnrow()),
 
-        rowRank(Mat.getcommgrid()->GetCommGridLayer()->GetRankInProcRow()),
-        colRank(Mat.getcommgrid()->GetCommGridLayer()->GetRankInProcCol())
+        rowRank(Mat->getcommgrid()->GetCommGridLayer()->GetRankInProcRow()),
+        colRank(Mat->getcommgrid()->GetCommGridLayer()->GetRankInProcCol())
 
     {
         SetGlobalInfo(Mat);
@@ -47,28 +49,32 @@ public:
 
     //TODO: Make a setlocalinfo function
 
-    SpParMatInfo(SpParMat<IT,NT,DER>& Mat):
+    SpParMatInfo(SpParMat<IT,NT,DER>* Mat):
 
-        locMat(Mat.seqptr()),
-        locNnz(Mat.seqptr()->getnnz()), 
-        locNcols(Mat.getncol() / RoundedSqrt<IT,IT>(worldSize)), 
-        locNrows(Mat.getnrow() / RoundedSqrt<IT,IT>(worldSize)),
-        locNcolsExact(Mat.seqptr()->getncol()),
-        locNrowsExact(Mat.seqptr()->getnrow()),
+        locMat(Mat->seqptr()),
+        locNnz(Mat->seqptr()->getnnz()), 
+        locNcols(Mat->getncol() / RoundedSqrt<IT,IT>(worldSize)), 
+        locNrows(Mat->getnrow() / RoundedSqrt<IT,IT>(worldSize)),
+        locNcolsExact(Mat->seqptr()->getncol()),
+        locNrowsExact(Mat->seqptr()->getnrow()),
 
-        rowRank(Mat.getcommgrid()->GetRankInProcRow()),
-        colRank(Mat.getcommgrid()->GetRankInProcCol()),
-        rank(Mat.getcommgrid()->GetRank())
+        rowRank(Mat->getcommgrid()->GetRankInProcRow()),
+        colRank(Mat->getcommgrid()->GetRankInProcCol()),
+        rank(Mat->getcommgrid()->GetRank()),
+        nnz(Mat->getnnz()),
+        ncols(Mat->getncol()),
+        nrows(Mat->getnrow()),
+        globDensity(static_cast<float>(Mat->getnnz()) / static_cast<float>(Mat->getncol()*Mat->getnrow()))
+
     {
-        SetGlobalInfo(Mat);
     }
 
     
     template <typename M>
-    void SetGlobalInfo(M& Mat) {
-        this->nnz = Mat.getnnz();
-        this->ncols = Mat.getncol();
-        this->nrows = Mat.getnrow();
+    void SetGlobalInfo(M * Mat) {
+        this->nnz = Mat->getnnz();
+        this->ncols = Mat->getncol();
+        this->nrows = Mat->getnrow();
         this->globDensity = static_cast<float>(this->nnz) / static_cast<float>(this->ncols*this->nrows);
     }
 

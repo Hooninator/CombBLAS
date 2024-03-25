@@ -43,6 +43,8 @@ public:
         infoPtr = new InfoLog("info-"+matnameA+"x"+matnameB+"-"+std::to_string(autotuning::rank)+".out", autotuning::rank);
 #endif
 
+        MPI_Barrier(A.getcommgrid()->GetWorld());
+
 #ifdef PROFILE
         infoPtr->StartTimerGlobal("TuneSpGEMM2DAnalytical");
 #endif
@@ -51,7 +53,15 @@ public:
         ModelType model;
         model.Create(platformParams);
         
+#ifdef PROFILE
+        infoPtr->StartTimerGlobal("Inputs");
+#endif
         SpGEMM2DModelAnalytical::Inputs<AIT,ANT,ADER,BIT,BNT,BDER> inputs(A, B);
+
+#ifdef PROFILE
+        infoPtr->EndTimerGlobal("Inputs");
+        infoPtr->PrintGlobal("Inputs");
+#endif
         
         SpGEMMParams resultParams; 
         resultParams = SearchBruteForce<SpGEMMParams, ModelType>(inputs, model);
@@ -119,6 +129,8 @@ public:
         infoPtr = new InfoLog("info-"+matnameA+"x"+matnameB+"-"+std::to_string(autotuning::rank)+".out", autotuning::rank);
 #endif
 
+        MPI_Barrier(A.getcommgrid()->GetWorld());
+
 #ifdef PROFILE
         infoPtr->StartTimerGlobal("TuneSpGEMM2DPhase");
 #endif
@@ -154,7 +166,7 @@ public:
 #endif
 
         //TODO: This makes this routine not generic since not all problems will have a 'searchspace2d' function
-        std::vector<P> searchSpace = P::ConstructSearchSpace2D(platformParams, jobPtr->nodes, jobPtr->tasksPerNode);
+        std::vector<P> searchSpace = P::ConstructSearchSpace2D(platformParams, jobPtr->nodes, 128);
 
         std::vector<P> localSpace;
         std::vector<int> recvCounts(autotuning::worldSize);
@@ -181,6 +193,9 @@ public:
 #endif
 
         std::vector<float> localPredictions = model.Predict(inputs, localSpace);
+#ifdef DEBUG
+        debugPtr->Print("Predictions done, beginning allgather, local size " + std::to_string(localPredictions.size()));
+#endif
 
         std::vector<float> predictions(searchSpace.size());
         MPI_Allgatherv((void*)(localPredictions.data()), localPredictions.size(), MPI_FLOAT,
@@ -189,7 +204,7 @@ public:
 
 
 #ifdef DEBUG
-        debugPtr->Print0("Searching for min");
+        debugPtr->Print("Searching for min");
 #endif
 
         P bestParams;  

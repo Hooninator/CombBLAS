@@ -106,31 +106,13 @@ public:
         using SpParMatInfo<IT,NT,DER>::gridDims; 
         using SpParMatInfo<IT,NT,DER>::globDensity; 
 
+        SpParMatInfoAnalytical(){}
         
-        SpParMatInfoAnalytical(SpParMat<IT,NT,DER>& Mat): 
-            SpParMatInfo<IT,NT,DER>(Mat),
-            nnzArr(new std::vector<IT>(0)),
-            locDensityArr(new std::vector<float>(worldSize))
+        //TODO: Make this not a pointer
+        SpParMatInfoAnalytical(SpParMat<IT,NT,DER> * Mat): 
+            SpParMatInfo<IT,NT,DER>(Mat)
         {
             
-            locDensityArr->insert(locDensityArr->begin() + rank,
-                                    static_cast<float>(locNnz) / static_cast<float>(locNcolsExact*locNrowsExact));
-            MPI_Allgather(MPI_IN_PLACE, 1, MPI_FLOAT, (void*)(locDensityArr->data()), 1, MPI_FLOAT, MPI_COMM_WORLD);
-
-            split = COL_SPLIT; // This is much nicer, and in 2d it doesn't matter
-
-#ifdef NNZ_TUPLES_COL
-
-#ifdef PROFILE
-            infoPtr->StartTimer("nnzTuplesColInit");
-#endif
-            nnzTuples = NnzTuplesCol();
-#ifdef PROFILE
-            infoPtr->EndTimer("nnzTuplesColInit");
-#endif
-
-#endif
-            MPI_Barrier(MPI_COMM_WORLD);
 
         }
 
@@ -432,10 +414,11 @@ public:
     class Inputs : public SpGEMM2DInputs<AIT,ANT,ADER,BIT,BNT,BDER> {
 
     public:
+        Inputs(){}
 
         Inputs<AIT,ANT,ADER,BIT,BNT,BDER>(SpParMat<AIT,ANT,ADER>& A,
                                                     SpParMat<BIT,BNT,BDER>& B):
-            Ainfo(A),Binfo(B)
+            Ainfo(&A),Binfo(&B)
         {
         }
 
@@ -448,66 +431,30 @@ public:
     template <typename AIT, typename ANT, typename ADER, typename BIT, typename BNT, typename BDER>
     std::vector<float> PredictImpl(Inputs<AIT,ANT,ADER, BIT, BNT, BDER>& inputs, std::vector<SpGEMMParams>& searchSpace) {
         
-        std::vector<float> predictions;
-        predictions.reserve(searchSpace.size());
-        for (auto params : searchSpace) {
+
+        std::vector<float> times(searchSpace.size());
+
+#ifdef PROFILE
+        infoPtr->StartTimerGlobal("Prediction");
+#endif
+
+        std::transform(searchSpace.begin(), searchSpace.end(), times.begin(),
+            [&inputs, this](auto& params) {
+
 #ifdef DEBUG
-            debugPtr->Log(params.OutStr());
-            debugPtr->Print0(params.OutStr());
+                debugPtr->Print(params.OutStr());
 #endif
+				auto bcastTime = this->BcastTime<AIT, ANT>(inputs, params); // Don't need Dmat here
+                auto localSpGEMMTime = this->LocalSpGEMMTime(inputs, params);
+                auto mergeTime = this->MergeTime(inputs, params);
+                return bcastTime + localSpGEMMTime + mergeTime;
+            }
+        );
 
 #ifdef PROFILE
-            infoPtr->Put("Nodes", std::to_string(params.GetNodes()));
-            infoPtr->Put("PPN", std::to_string(params.GetPPN()));
-            infoPtr->Print("Nodes");
-            infoPtr->Print("PPN");
+        infoPtr->EndTimerGlobal("Prediction");
 #endif
-
-            auto Ainfo = inputs.Ainfo;
-            auto Binfo = inputs.Binfo;
-
-            // Set dimensions of 3D processor grid
-            Ainfo.SetGridDims(params);
-            Binfo.SetGridDims(params);
-
-            // Compute nnz per tile in hypothetical 3D grid
-            Ainfo.ComputeNnzArr(params);
-            Binfo.ComputeNnzArr(params);
-
-            //BROADCAST
-            CommModel<AIT> *bcastModel = new PostCommModel<AIT>(platformParams.GetInternodeAlpha(),
-                                                        platformParams.GetInternodeBeta(),
-                                                         platformParams.GetIntranodeBeta());
-            float bcastATime = BcastTime(bcastModel, Ainfo, params, true);
-            float bcastBTime = BcastTime(bcastModel, Binfo, params, false);
-            
-            //LOCAL SpGEMM
-            LocalSpGEMMModel<AIT, BIT>* localMultModel = new RooflineLocalSpGEMMModel<AIT, ANT, BIT, BNT>(autotuning::perlmutterParams);
-            float localMultTime = LocalMultTime(localMultModel, Ainfo, Binfo, params);
-
-#ifdef PROFILE
-            infoPtr->Put("bcastTime-A", std::to_string(bcastATime/1e6));
-            infoPtr->Put("bcastTime-B", std::to_string(bcastBTime/1e6));
-            infoPtr->Put("multTime", std::to_string(localMultTime/1e6));
-#endif
-
-            delete bcastModel;
-            delete localMultModel;
-
-            MPI_Barrier(MPI_COMM_WORLD);
-
-            float time =  bcastATime + bcastBTime + localMultTime;
-
-#ifdef PROFILE
-            infoPtr->Put("TotalTime", std::to_string(time));
-            infoPtr->WriteInfo();
-            infoPtr->Clear();
-#endif
-
-            predictions.push_back(time);
-        }
-
-        return predictions;
+        return times;
 
     }
 
@@ -515,141 +462,68 @@ public:
     /* BROADCAST */
 
     //TODO: Consider nnz estimator class + template to make switching between things here easier
-    template <typename IT, typename NT, typename DER>
-    float BcastTime(CommModel<IT> * bcastModel, SpParMatInfoAnalytical<IT,NT,DER>& Minfo, SpGEMMParams& params, bool row) {
+    template <typename AIT, typename ANT, typename ADER, typename BIT, typename BNT, typename BDER>
+    float BcastTime(Inputs<AIT,ANT,ADER,BIT,BNT,BDER>& inputs, SpGEMMParams& params) {
 
-#ifdef PROFILE
-        if (row)
-            infoPtr->StartTimer("bcastCalcTime-A");
-        else
-            infoPtr->StartTimer("bcastCalcTime-B");
-#endif
+		auto Ainfo = inputs.Ainfo;
+		auto Binfo = inputs.Binfo;
+		
+        auto TreeBcast = [this](int commSize, AIT msgSize) {
+            float alpha = this->platformParams.GetInternodeAlpha() * std::log2(commSize);
+            float beta = (std::log2(commSize) * msgSize) / this->platformParams.GetInternodeBeta();
+            return (alpha + beta) / (1e6);
+        };
 
-        std::vector<IT> * nnz2D = Minfo.GetNnzArr();
+        auto MsgSize = [](AIT nnz) {
+            return nnz*sizeof(ANT) + nnz*sizeof(AIT) + (nnz + 1) * sizeof(AIT);
+        };
 
-        // Compute local bcast times
-        std::vector<float> locBcastTimes(params.GetTotalProcs());
-        for (int p=0; p<params.GetTotalProcs(); p++) {
-            
-            // Vector containing nnz for each rank participating in broadcasts with rank p
-            std::vector<IT> nnzBcastWorld(params.GetGridDim());
-            //TODO: Params class should have methods that return ranks in row/col, then just use std::transform to create bcast world
-            if (row) 
-                nnzBcastWorld = Minfo.SliceNnzRow(nnz2D, p, params.GetGridDim());
-            else
-                nnzBcastWorld = Minfo.SliceNnzCol(nnz2D, p, params.GetGridDim());
-            
-            // Compute and sum all times for all bcasts rank p participates in 
-            float locBcastTime = std::reduce(nnzBcastWorld.begin(), nnzBcastWorld.end(), 0, 
-                [&Minfo, &bcastModel, &params](float sum, IT nnz) {
-                    IT msgSize = Minfo.ComputeMsgSize(nnz);
+        float c = (float)(Ainfo.GetNnz()) / (float)(Ainfo.GetNcols());
 
-                    CommOpts * opts = new CommOpts{
-                        //gridSize <= params.GetCoresPerNode() ? true : false //intranode
-                        false
-                    };
+        AIT nnzA = (c*Ainfo.GetNcols()) / params.GetTotalProcs();
+        BIT nnzB = (c*Binfo.GetNcols()) / params.GetTotalProcs();
+		
+		AIT bytesA = MsgSize(nnzA);
+		BIT bytesB = MsgSize(nnzB);
+		
+		double bcastA = TreeBcast(params.GetGridDim(), bytesA);
+		double bcastB = TreeBcast(params.GetGridDim(), bytesB);
+		
+		return (bcastA + bcastB) * params.GetGridDim();
 
-                    CommInfo<IT> * info = MakeBcastCommInfo(params.GetGridDim(),  msgSize); 
-
-                    float singleBcastTime = bcastModel->Time(info, opts);
-
-                    delete info;
-                    delete opts;
-
-                    return singleBcastTime + sum;
-                }
-            );
-            
-            locBcastTimes[p] = locBcastTime;
-
-        }
-
-        // Reduce to get max time
-        float finalTime = std::reduce(locBcastTimes.begin(), locBcastTimes.end(), 0,
-            [](float currMax, float currElem) {
-                return std::max(currMax, currElem);
-            }
-        );
-
-#ifdef PROFILE
-        if (row) {
-            infoPtr->EndTimer("bcastCalcTime-A");
-            infoPtr->Print("bcastCalcTime-A");
-        } else {
-            infoPtr->EndTimer("bcastCalcTime-B");
-            infoPtr->Print("bcastCalcTime-B");
-        }
-#endif
-
-        return finalTime;
     }
 
 
     /* LOCAL SpGEMM */
     
     template <typename AIT, typename ANT, typename ADER, typename BIT, typename BNT, typename BDER>
-    float LocalMultTime(LocalSpGEMMModel<AIT, BIT>* model, 
-                            SpParMatInfoAnalytical<AIT,ANT,ADER>& Ainfo,
-                            SpParMatInfoAnalytical<BIT,BNT,BDER>& Binfo,
-                            SpGEMMParams& params) {
-#ifdef PROFILE
-        infoPtr->StartTimer("multCalcTime");
-#endif
-        
-        auto Adims = Ainfo.GetGridDims(); 
-        auto Bdims = Binfo.GetGridDims();
+    float LocalSpGEMMTime(Inputs<AIT,ANT,ADER,BIT,BNT,BDER>& inputs, SpGEMMParams& params) {
+		auto Ainfo = inputs.Ainfo;
+		auto Binfo = inputs.Binfo;
+		
+		auto FLOPS = [](float c, AIT n, int p){
+            float singleMultTime = 2.0*(std::min(1.0, (c/(std::sqrt(p))))) +
+                                        ((std::pow(c,2.0)*n) / (std::sqrt(p)*p)) *
+                                        std::log2(std::min(n/std::sqrt(p), (std::pow(c,2.0)*n)/(std::sqrt(p)*p)));
+            return singleMultTime * std::sqrt(p);
+		};
 
-        const int totalProcs = params.GetTotalProcs();
+        return FLOPS(Ainfo.GetGlobDensity()*Ainfo.GetNcols(), Ainfo.GetNcols(), params.GetTotalProcs())*
+                        this->platformParams.GetCostFLOP();
 
-        std::vector<float> * localSpGEMMTimes = new std::vector<float>;
-        localSpGEMMTimes->reserve(totalProcs);
-        for (int p=0; p<totalProcs; p++) {
-
-            auto ranksA = Ainfo.RowRanks(p, params);
-            auto ranksB = Binfo.ColRanks(p, params);
-
-            ASSERT(ranksA.size()==ranksB.size(), "ranksA and ranksB should be the same size, instead got " +
-                                            std::to_string(ranksA.size()) +  "," + std::to_string(ranksB.size()));
-
-            for (int i=0; i<ranksA.size(); i++) {
-                int rankA = ranksA[i];
-                int rankB = ranksB[i];
-                LocalSpGEMMInfo<AIT, BIT> * info = new LocalSpGEMMInfo<AIT, BIT> 
-                                                    { -1, //placeholder 
-                                                    std::get<0>(Adims), std::get<1>(Adims),
-                                                    std::get<0>(Bdims), std::get<1>(Bdims),
-                                                    Ainfo.ComputeLocNnzGrid(NNZ_ARR,rankA), 
-                                                    Binfo.ComputeLocNnzGrid(NNZ_ARR,rankB),
-                                                    Ainfo.GetGlobDensity(),
-                                                    Ainfo.GetLocDensityArr()->at(rankA),
-                                                    Binfo.GetGlobDensity(),
-                                                    Binfo.GetLocDensityArr()->at(rankB)};
-                info->SetFLOPS(params, FLOPS_LOC_DENSITY);
-                localSpGEMMTimes->push_back(model->Time(info));
-            }
-
-        }
-
-
-        // Reduce to get max time
-        float finalTime = std::reduce(localSpGEMMTimes->begin(),localSpGEMMTimes->end(), 0,
-            [](float currMax, float currElem) {
-                return std::max(currMax, currElem);
-            }
-        );
-
-        delete localSpGEMMTimes;
-
-#ifdef PROFILE
-        infoPtr->EndTimer("multCalcTime");
-        infoPtr->Print("multCalcTime");
-#endif
-
-        return finalTime;
     }
 
-    float LayerMergeTime() {
-        return 0;
+    template <typename AIT, typename ANT, typename ADER, typename BIT, typename BNT, typename BDER>
+    float MergeTime(Inputs<AIT,ANT,ADER,BIT,BNT,BDER>& inputs, SpGEMMParams& params) {
+		auto Ainfo = inputs.Ainfo;
+		auto Binfo = inputs.Binfo;
+
+        auto FLOPS = [](float c, AIT n, int p) {
+            return (std::pow(c,2.0)*n*std::log2(std::sqrt(p))) / p;
+        };
+
+        return FLOPS(Ainfo.GetGlobDensity()*Ainfo.GetNcols(), Ainfo.GetNcols(), params.GetTotalProcs())*
+                    this->platformParams.GetCostFLOP();
     }
  
 };
@@ -685,7 +559,7 @@ public:
         using SpParMatInfo<IT,NT,DER>::globDensity;
 
         SpParMatInfoXgb(SpParMat<IT,NT,DER>& Mat):
-            SpParMatInfo<IT,NT,DER>(Mat)
+            SpParMatInfo<IT,NT,DER>(&Mat)
         {
             
             featureMap.emplace("nnz", nnz);
@@ -950,7 +824,7 @@ public:
         using SpParMatInfo<IT,NT,DER>::nrows;
 
         SpParMatInfoPhase(SpParMat<IT,NT,DER>& Mat):
-            SpParMatInfo<IT,NT,DER>(Mat)
+            SpParMatInfo<IT,NT,DER>(&Mat)
         {
             gridComm = Mat.getcommgrid()->GetWorld();
             worldSize = Mat.getcommgrid()->GetSize();
@@ -1285,14 +1159,14 @@ public:
 #ifdef PROFILE
                     t0 = MPI_Wtime();
 #endif
-                    nnzC = estimateNNZ_HashFast(*ARecv, *BRecv, colFlopC);
+                  //  nnzC = estimateNNZ_HashFast(*ARecv, *BRecv, colFlopC);
 #ifdef PROFILE
                     t1 = MPI_Wtime();
                     nnzTime += (t1-t0);
 #endif
                 }
 
-				*nnzC_SUMMA = std::max(nnzC, *nnzC_SUMMA);
+				//*nnzC_SUMMA = std::max(nnzC, *nnzC_SUMMA);
 
 
 				// delete received data
@@ -1301,6 +1175,7 @@ public:
 				if(i != Bself)
 					delete BRecv;
 			}
+
 
 			SpHelper::deallocate2D(ARecvSizes, UDERA::esscount);
 			SpHelper::deallocate2D(BRecvSizes, UDERB::esscount);
@@ -1469,7 +1344,7 @@ public:
         auto TreeBcast = [this](int commSize, IT msgSize) {
             float alpha = this->platformParams.GetInternodeAlpha() * std::log2(commSize);
             float beta = (std::log2(commSize) * msgSize) / this->platformParams.GetInternodeBeta();
-            return (alpha + beta);
+            return (alpha + beta)/(1e6);
         };
 
         auto MsgSize = [](IT nnz) {
