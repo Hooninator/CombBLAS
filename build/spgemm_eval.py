@@ -52,8 +52,9 @@ n_features = len(features)
 class PlatformParams:
     inter_beta: float
     inter_alpha: float
+    gamma:float
 
-perlmutter_params = PlatformParams(23980.54, 3.9)
+perlmutter_params = PlatformParams(23980.54, 3.9, 5.2e-9)
 
 
 def train_model_xgb(args, train_data, test_data):
@@ -253,7 +254,7 @@ class ProblemPhaseResults:
 
 def eval_phase(args, test_df, model, bulk=True):
     
-    os.system(f"rm -f {args.label}-plots/*")
+    #os.system(f"rm -f {args.label}-plots/*")
 
     test_df['params'] = test_df.apply(lambda row: f"{row['Nodes']}, {row['PPN']}", axis=1)
     test_df['processes'] = test_df.apply(lambda row: f"{row['Nodes']*row['PPN']}", axis=1)
@@ -296,6 +297,12 @@ def eval_phase(args, test_df, model, bulk=True):
 
             etime = time.time()
             print(f"Time for inference: {etime-stime}s")
+        elif args.eval=="analytical":
+            for params, df_problem_params in df_problem.groupby(by=["Nodes", "PPN"]):
+                p = float(df_problem_params["processes"].values[0])
+                y_pred_arr.append(model(problem, p))
+                y_arr.append(max(df_problem_params[args.label]))
+                valid_params.append(df_problem_params["params"].values[0])
         else:
             for param in params:
 
@@ -317,7 +324,7 @@ def eval_phase(args, test_df, model, bulk=True):
                 print(f"Time for inference: {etime-stime}s")
         
 
-        results.add_result(problem, y_arr, y_pred_arr, None, None)
+        results.add_result(problem, y_arr, y_pred_arr, 0.0,{})
 
         if args.plotname:
             kt = results.get_result_stat(problem, "kt")
@@ -342,7 +349,7 @@ def eval_phase(args, test_df, model, bulk=True):
 
 def eval_cpp(args, test_df):
     
-    os.system(f"rm -f {args.label}-plots/*")
+    #os.system(f"rm -f {args.label}-plots/*")
 
     test_df['params'] = test_df.apply(lambda row: f"{row['Nodes']}, {row['PPN']}", axis=1)
     test_df['processes'] = test_df.apply(lambda row: f"{row['Nodes']*row['PPN']}", axis=1)
@@ -377,20 +384,22 @@ def eval_cpp(args, test_df):
         nodes_cmd = int(df_problem["Nodes"].max())
         ppn_cmd = 64 if math.sqrt(nodes_cmd).is_integer() else 128
         permuted = 1 if "permuted" in problem else 0
-        threads = 2 if ppn_cmd==64 else 1
+        threads = 4 if ppn_cmd==64 else 2
 
         mat_name = problem.split(".")[0]
         
-        cmd = f"export OMP_NUM_THREADS={threads} && srun --tasks-per-node {ppn_cmd} -N {nodes_cmd} Applications/autotune /pscratch/sd/j/jbellav/matrices/{mat_name}/{mat_name}.mtx /pscratch/sd/j/jbellav/matrices/{mat_name}/{mat_name}.mtx {permuted}"
+        cmd = f"export OMP_NUM_THREADS={threads} && srun --tasks-per-node {ppn_cmd} -N {nodes_cmd} Applications/autotune /pscratch/sd/j/jbellav/matrices/{mat_name}/{mat_name}.mtx /pscratch/sd/j/jbellav/matrices/{mat_name}/{mat_name}.mtx {permuted} {args.method}"
 
         print(f"Executing {cmd}...")
 
-        result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
 
         try:
+            result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=180)
             result.check_returncode()
         except:
             print(result.stderr)
+            os.system(f"rm -f info-{mat_name}x{mat_name}*")
+            os.system("rm -f logfile*")
             i+=1
             continue
         
@@ -413,7 +422,7 @@ def eval_cpp(args, test_df):
                 if line.find("FeatureInit:")!=-1 and line.find("%")==-1:
                     t = float(line.split(":")[1])
                     timings["FeatureInit"] = t
-                if line.find("TuneSpGEMM2DPhase:")!=-1 and line.find("%")==-1:
+                if line.find("TuneSpGEMM2D")!=-1 and line.find("%")==-1:
                     t = float(line.split(":")[1])
                     timings["TuneSpGEMM2D"] = t
 
@@ -436,28 +445,15 @@ def eval_cpp(args, test_df):
         spgemm_runtime = float(result.stdout.split("[Total]:")[1]) #df_max[df_max["params"]==f"{float(nodes_cmd)}, {float(ppn_cmd)}"][args.label].item()
         results.add_result(problem, y_arr, y_pred_arr, spgemm_runtime, timings)
 
-            #kt = results.get_result_stat(problem, "kt")
-            #rmse = results.get_result_stat(problem, "rmse")
-            #plt.scatter(valid_params, y_arr, label="Actual", marker='.',s=100)
-            #plt.scatter(valid_params, y_pred_arr, label=f"Predicted\n(kt={kt})\n(rmse={rmse})", marker='.',s=100)
-            #plt.ylabel("Runtime (s)")
-            #plt.yscale("log")
-            #plt.xlabel("Params")
-            #plt.xticks(rotation='vertical')
-            #plt.title(f"Actual vs. Predicted Runtime for {problem} {args.label}")
-            #plt.legend()
-            #plt.savefig(f"{args.label}-plots/{args.plotname}-{problem}.png", bbox_inches='tight')
-            #plt.clf()
-            
 
         i+=1
 
-    with open("cpp-results.pkl", 'wb') as picklefile:
+    with open(f"cpp-results-{args.method}-nonnz.pkl", 'wb') as picklefile:
         pickle.dump(results, picklefile)
 
     results.output_eval()
     results.plot_eval()
-    results.plot_spgemm()
+    #results.plot_spgemm()
 
 
 def correctness(df, mat_name):
@@ -624,6 +620,54 @@ def spgemm_model(X):
     return bcast_pred + mult_pred + merge_pred
 
 
+def bcast_model_analytical(c, n, p):
+    nnz_A = (c*n)/(p)
+    nnz_B = (c*n)/(p)
+    bytes_A = nnz_A * 8 + nnz_A * 8 + nnz_A * 8
+    bytes_B = nnz_B * 8 + nnz_B * 8 + nnz_B * 8
+    alpha = 2*math.log2(math.sqrt(p)) * perlmutter_params.inter_alpha
+    beta = (math.log2(math.sqrt(p)) * (bytes_A + bytes_B)) / perlmutter_params.inter_beta
+    single_bcast_time = (alpha + beta)/(1e6) # Convert to s
+    return single_bcast_time * math.sqrt(p)
+
+
+def loc_mult_model_analytical(c, n, p):
+    time = math.sqrt(p) * ( 2*min(1, (c/math.sqrt(p))) + 
+                                        ( (math.pow(c,2)*n)/math.pow(c,(3/2)) ) * math.log2(min((n/math.sqrt(p)), (math.pow(c,2)*n)/math.pow(c,(3/2)))))
+    return perlmutter_params.gamma * time
+
+
+def merge_model_analytical(c, n, p):
+    time = (math.pow(c, 2)*n*math.log2(math.sqrt(p)))/p
+    return perlmutter_params.gamma * time
+
+
+def spgemm_model_analytical(problem, p):
+    
+    mat_name = problem.split(".mtx")[0]
+    path = f"/pscratch/sd/j/jbellav/matrices/{mat_name}/{mat_name}.mtx"
+
+    m, n, nnz = read_mm_info(path)
+
+    c = nnz / n # Expected nnz per column
+
+    bcast_pred = bcast_model_analytical(c, n, p)
+    mult_pred = loc_mult_model_analytical(c, n, p)
+    merge_pred = merge_model_analytical(c, n, p)
+    return bcast_pred + mult_pred + merge_pred
+
+
+def read_mm_info(path):
+    with open(path, 'r') as file:
+        for line in file:
+            if line.find("%")!=-1:
+                continue
+            else:
+                info = line.split(" ")
+                m, n, nnz = int(info[0]), int(info[1]), int(info[2])
+                break
+    return (m, n, nnz)
+
 if __name__=="__main__":
 
     parser = argparse.ArgumentParser()
@@ -633,6 +677,7 @@ if __name__=="__main__":
     parser.add_argument("--problem",type=str)
     parser.add_argument("--train", const=1, nargs='?', type=int)
     parser.add_argument("--eval", type=str)
+    parser.add_argument("--method", type=str)
     parser.add_argument("--verbose", const=1, nargs='?', type=int)
     parser.add_argument("--randtest", const=1, nargs='?', type=int)
     parser.add_argument("--epochs",  type=int)
@@ -686,6 +731,8 @@ if __name__=="__main__":
         eval_phase(args,test_data, spgemm_model)
     elif args.eval=="cpp":
         eval_cpp(args,test_data)
+    elif args.eval=="analytical":
+        eval_phase(args, test_data, spgemm_model_analytical, False)
     
 
     
