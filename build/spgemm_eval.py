@@ -349,8 +349,6 @@ def eval_phase(args, test_df, model, bulk=True):
 
 def eval_cpp(args, test_df):
     
-    #os.system(f"rm -f {args.label}-plots/*")
-
     test_df['params'] = test_df.apply(lambda row: f"{row['Nodes']}, {row['PPN']}", axis=1)
     test_df['processes'] = test_df.apply(lambda row: f"{row['Nodes']*row['PPN']}", axis=1)
 
