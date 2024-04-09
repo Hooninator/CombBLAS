@@ -57,41 +57,6 @@ class PlatformParams:
 perlmutter_params = PlatformParams(23980.54, 3.9, 5.2e-9)
 
 
-def train_model_xgb(args, train_data, test_data):
-
-    print(train_data.columns)
-    X_train, X_test, y_train, y_test = train_data[features], test_data[features], train_data[args.label], test_data[args.label]
-
-    training_data = xgb.DMatrix(X_train, label=y_train)
-    test_data = xgb.DMatrix(X_test, label=y_test)
-    
-    param = { 
-        'max_depth':2,
-        'eta':1,
-        'objective': 'reg:squarederror',
-        'eval_metric': 'rmse'
-    }
-    
-    evallist = [(training_data, 'train'), (test_data, 'eval')]
-    
-    nrounds = args.epochs
-    evals_result = {}
-    bst = xgb.train(param, training_data, nrounds, evallist, verbose_eval=args.verbose, evals_result=evals_result)
-    
-    print(evals_result)
-
-    bst.save_model(f"{path_prefix}models/{args.modelname}.model")
-    
-    plt.plot(range(nrounds), evals_result['train']['rmse'], label="train loss")
-    plt.plot(range(nrounds), evals_result['eval']['rmse'], label="test loss")
-    plt.yscale("log")
-    plt.ylabel("Loss")
-    plt.xlabel("Iteration")
-    plt.title(f"Train and Test Loss")
-    plt.legend()
-    plt.savefig(f"{args.plotname}-loss", bbox_inches='tight')
-
-
 class ProblemPhaseResults:
 
 
@@ -178,7 +143,6 @@ class ProblemPhaseResults:
         print(f"----NUMBER CORRECT1 : {sum(correct_arr1)}/{len(correct_arr1)}")
         print(f"----NUMBER CORRECT2 : {sum(correct_arr2)}/{len(correct_arr2)}")
         print(f"----NUMBER CORRECT3 : {sum(correct_arr3)}/{len(correct_arr3)}")
-        #print(f"----TOTAL TOP 1 ERROR: {sum(err_arr)}")
         print(f"----AVERAGE TOP 1 ERROR: {sum(err_arr1)/len(err_arr1)}")
         print(f"----MEDIAN TOP 1 ERROR: {stats.median(err_arr1)}")
         print(f"----AVERAGE TOP 2 ERROR: {sum(err_arr2)/len(err_arr2)}")
@@ -252,102 +216,7 @@ class ProblemPhaseResults:
         plt.clf()
 
 
-def eval_phase(args, test_df, model, bulk=True):
-    
-    #os.system(f"rm -f {args.label}-plots/*")
-
-    test_df['params'] = test_df.apply(lambda row: f"{row['Nodes']}, {row['PPN']}", axis=1)
-    test_df['processes'] = test_df.apply(lambda row: f"{row['Nodes']*row['PPN']}", axis=1)
-
-    problems = test_df['problem'].unique()
-
-    results = ProblemPhaseResults()
-    i = 0
-    
-    print(f"Evaluating {len(problems)} problems")
-    for problem in problems:
-
-        if i%10==0:
-            print(f"{i}/{len(problems)} evaluated...")
-
-        df_problem = test_df[test_df['problem']==problem]
-        
-        params = df_problem['params'].unique()
-        
-        y_pred_arr = []
-        y_arr = []
-        processes = []
-        valid_params = []
-
-        if bulk:
-
-            stime = time.time()
-
-            X = df_problem[features]
-            y = df_problem[args.label]
-            y_pred = model(X)
-
-            df_problem['pred'] = y_pred
-            
-            df_max = df_problem.groupby(by=["Nodes","PPN"]).max()
-            y_pred_arr = df_max['pred']
-            y_arr = df_max[args.label]
-
-            valid_params = params
-
-            etime = time.time()
-            print(f"Time for inference: {etime-stime}s")
-        elif args.eval=="analytical":
-            for params, df_problem_params in df_problem.groupby(by=["Nodes", "PPN"]):
-                p = float(df_problem_params["processes"].values[0])
-                y_pred_arr.append(model(problem, p))
-                y_arr.append(max(df_problem_params[args.label]))
-                valid_params.append(df_problem_params["params"].values[0])
-        else:
-            for param in params:
-
-                df_problem_params = df_problem[df_problem['params']==param]
-
-                if not math.sqrt(df_problem_params.shape[0]).is_integer():
-                    print("erroneous grid")
-                    continue
-
-                stime = time.time()
-                X = df_problem_params[features]
-                y = df_problem_params[args.label]
-                y_pred = model(X)
-                y_pred_arr.append(max(y_pred))
-                y_arr.append(max(y))
-                processes.append(df_problem_params['processes'].values[0])
-                valid_params.append(param)
-                etime = time.time()
-                print(f"Time for inference: {etime-stime}s")
-        
-
-        results.add_result(problem, y_arr, y_pred_arr, 0.0,{})
-
-        if args.plotname:
-            kt = results.get_result_stat(problem, "kt")
-            rmse = results.get_result_stat(problem, "rmse")
-            plt.scatter(valid_params, y_arr, label="Actual", marker='.',s=100)
-            plt.scatter(valid_params, y_pred_arr, label=f"Predicted\n(kt={kt})\n(rmse={rmse})", marker='.',s=100)
-            plt.ylabel("Runtime (s)")
-            plt.yscale("log")
-            plt.xlabel("Params")
-            plt.xticks(rotation='vertical')
-            plt.title(f"Actual vs. Predicted Runtime for {problem} {args.label}")
-            plt.legend()
-            plt.savefig(f"{args.label}-plots/{args.plotname}-{problem}.png", bbox_inches='tight')
-            plt.clf()
-
-        i+=1
-
-    results.output_eval()
-    results.plot_eval()
-
-
-
-def eval_cpp(args, test_df):
+def eval_spgemm(args, test_df):
     
     test_df['params'] = test_df.apply(lambda row: f"{row['Nodes']}, {row['PPN']}", axis=1)
     test_df['processes'] = test_df.apply(lambda row: f"{row['Nodes']*row['PPN']}", axis=1)
@@ -435,23 +304,13 @@ def eval_cpp(args, test_df):
             y_arr[list(params).index(param)] = param_time 
 
 
-        print(params)
-        print(y_pred_arr)
-        print(y_arr)
-
-
-        spgemm_runtime = float(result.stdout.split("[Total]:")[1]) #df_max[df_max["params"]==f"{float(nodes_cmd)}, {float(ppn_cmd)}"][args.label].item()
+        spgemm_runtime = float(result.stdout.split("[Total]:")[1]) 
         results.add_result(problem, y_arr, y_pred_arr, spgemm_runtime, timings)
-
 
         i+=1
 
     with open(f"cpp-results-{args.method}-nonnz.pkl", 'wb') as picklefile:
         pickle.dump(results, picklefile)
-
-    results.output_eval()
-    results.plot_eval()
-    #results.plot_spgemm()
 
 
 def correctness(df, mat_name):
@@ -514,9 +373,6 @@ def split(df, size):
     problems = df['problem'].unique()
     s = int(len(problems)*size)
 
-    #random.shuffle(problems)
-    #print(len(problems))
-
     test_problems, train_problems = problems[:s],problems[s:]
     
     test, train = df[df['problem'].isin(test_problems)], df[df['problem'].isin(train_problems)]
@@ -527,8 +383,7 @@ def loc_mult_model(X, use_xgb=True):
     X = X.drop(labels=["rank"], axis=1)
     if use_xgb:
         bst = xgb.Booster()
-        #bst.load_model(f"{path_prefix}models/xgb-mult-best.model")
-        bst.load_model(f"{path_prefix}models/xgb-mult-nonnz.model")
+        bst.load_model(f"{path_prefix}models/xgb-mult-best.model")
         return np.array(bst.predict(xgb.DMatrix(X)))
     else:
         return 0
@@ -538,8 +393,7 @@ def merge_model(X, use_xgb=True):
     X = X.drop(labels=["rank"], axis=1)
     if use_xgb:
         bst = xgb.Booster()
-        #bst.load_model(f"{path_prefix}models/xgb-merge-best.model")
-        bst.load_model(f"{path_prefix}models/xgb-merge-nonnz.model")
+        bst.load_model(f"{path_prefix}models/xgb-merge-best.model")
         return np.array(bst.predict(xgb.DMatrix(X)))
     else:
         return 0
@@ -550,18 +404,6 @@ def bcast_model(X):
         alpha = math.log2(grid_dim)*perlmutter_params.inter_alpha
         beta = math.log2(grid_dim)*(total_bytes / perlmutter_params.inter_beta)
         return (alpha+beta) / 1e6
-
-    def bcast_ring(grid_dim, msg_size):
-        alpha = (math.log2(grid_dim) + grid_dim - 1)*perlmutter_params.inter_alpha
-        beta = ((2*(grid_dim-1))/grid_dim)*(msg_size/perlmutter_params.inter_beta)
-        return (alpha+beta)/1e6
-
-    def bcast_regression(nodes, ppn, msg_size):
-        if math.isnan(msg_size):
-            return 0
-        with open("./bcast-bench/bcast-model.pkl", 'rb') as file:
-            model = pickle.load(file)
-            return model.predict(pd.DataFrame({"nodes":[nodes], "ppn":[ppn], "msg_size":[msg_size]}))[0]/(1e6)
 
 
     grid_dim = int(math.sqrt(X.shape[0]))
@@ -588,11 +430,7 @@ def bcast_model(X):
         total_bytes = bytes_A + bytes_B
 
         # Decide which bcast algorithm to use based on msg size
-        #if total_bytes < 1e8 or True:
         bcast_time = bcast_tree(grid_dim, total_bytes)
-        #else:
-        #    bcast_time = bcast_ring(grid_dim, total_bytes)
-        #bcast_time = bcast_regression(nodes, ppn, total_bytes)
         
         times_mat[row_rank, col_rank] = bcast_time
 
@@ -606,84 +444,15 @@ def bcast_model(X):
     return times_mat.flatten()
 
 
-def spgemm_model(X):
-    bcast_pred = np.array([]) 
-    for _, x in X.groupby(by=["Nodes","PPN"]):
-        bcast_pred = np.append(bcast_pred, (bcast_model(x)))
-    mult_pred = loc_mult_model(X, True)
-    merge_pred = merge_model(X, True)
-    
-    #bcast_pred = np.zeros(shape=(X.shape[0]))
-
-    return bcast_pred + mult_pred + merge_pred
-
-
-def bcast_model_analytical(c, n, p):
-    nnz_A = (c*n)/(p)
-    nnz_B = (c*n)/(p)
-    bytes_A = nnz_A * 8 + nnz_A * 8 + nnz_A * 8
-    bytes_B = nnz_B * 8 + nnz_B * 8 + nnz_B * 8
-    alpha = 2*math.log2(math.sqrt(p)) * perlmutter_params.inter_alpha
-    beta = (math.log2(math.sqrt(p)) * (bytes_A + bytes_B)) / perlmutter_params.inter_beta
-    single_bcast_time = (alpha + beta)/(1e6) # Convert to s
-    return single_bcast_time * math.sqrt(p)
-
-
-def loc_mult_model_analytical(c, n, p):
-    time = math.sqrt(p) * ( 2*min(1, (c/math.sqrt(p))) + 
-                                        ( (math.pow(c,2)*n)/math.pow(c,(3/2)) ) * math.log2(min((n/math.sqrt(p)), (math.pow(c,2)*n)/math.pow(c,(3/2)))))
-    return perlmutter_params.gamma * time
-
-
-def merge_model_analytical(c, n, p):
-    time = (math.pow(c, 2)*n*math.log2(math.sqrt(p)))/p
-    return perlmutter_params.gamma * time
-
-
-def spgemm_model_analytical(problem, p):
-    
-    mat_name = problem.split(".mtx")[0]
-    path = f"/pscratch/sd/j/jbellav/matrices/{mat_name}/{mat_name}.mtx"
-
-    m, n, nnz = read_mm_info(path)
-
-    c = nnz / n # Expected nnz per column
-
-    bcast_pred = bcast_model_analytical(c, n, p)
-    mult_pred = loc_mult_model_analytical(c, n, p)
-    merge_pred = merge_model_analytical(c, n, p)
-    return bcast_pred + mult_pred + merge_pred
-
-
-def read_mm_info(path):
-    with open(path, 'r') as file:
-        for line in file:
-            if line.find("%")!=-1:
-                continue
-            else:
-                info = line.split(" ")
-                m, n, nnz = int(info[0]), int(info[1]), int(info[2])
-                break
-    return (m, n, nnz)
-
 if __name__=="__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--plotname",type=str)
     parser.add_argument("--label",type=str)
-    parser.add_argument("--modelname",type=str)
     parser.add_argument("--problem",type=str)
-    parser.add_argument("--train", const=1, nargs='?', type=int)
-    parser.add_argument("--eval", type=str)
     parser.add_argument("--method", type=str)
-    parser.add_argument("--verbose", const=1, nargs='?', type=int)
-    parser.add_argument("--randtest", const=1, nargs='?', type=int)
-    parser.add_argument("--epochs",  type=int)
-    parser.add_argument("--nproblems", type=int)
-    parser.add_argument("--neval", type=int)
     parser.add_argument('--load', const=1, nargs='?', type=int)
     parser.add_argument('--correctness', const=1, nargs='?', type=int)
-
 
     args = parser.parse_args()
     
@@ -697,40 +466,20 @@ if __name__=="__main__":
         df = df[df['problem'].isin(valid_problems)]
         
         # Make sure each grid is valid
-        
         for p in valid_problems:
             df_problem = df[df['problem']==p]
             for _, d in df_problem.groupby(by=["Nodes", "PPN"]):
                 if not math.sqrt(d.shape[0]).is_integer():
                     df = df.drop(labels=d.index)
-            
 
         df.to_pickle("./master-df-gnn.pkl")
     else:
         df = pd.read_pickle("./master-df-gnn.pkl")
     
-    df["no-bcast"] = df["local-mult"] + df["merge"]
-    
-    test_data, train_data = split(df, 0.1)
-    
-    if args.train:
-        train_model_xgb(args, train_data, test_data)
-
     if args.correctness:
         correctness(df, args.problem)
-    
-    if args.eval=="mult":
-        eval_phase(args, test_data, loc_mult_model)
-    elif args.eval=="merge":
-        eval_phase(args, test_data, merge_model)
-    elif args.eval=="bcast":
-        eval_phase(args,  test_data, bcast_model, False)
-    elif args.eval=="spgemm":
-        eval_phase(args,test_data, spgemm_model)
-    elif args.eval=="cpp":
-        eval_cpp(args,test_data)
-    elif args.eval=="analytical":
-        eval_phase(args, test_data, spgemm_model_analytical, False)
+    else:
+        eval_spgemm(args, df)
     
 
     
