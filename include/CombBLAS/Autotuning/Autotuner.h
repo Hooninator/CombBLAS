@@ -79,6 +79,58 @@ public:
         return resultParams;
 
     }
+
+    //TODO: This should really be completely changed so the model type is a template parameter...
+    // this is literally just the same as the method above this, but with a different model type...
+    // will also need some way to match model types to tuning methods, since not every model supports all methods
+    template <typename AIT, typename ANT, typename ADER, typename BIT, typename BNT, typename BDER>
+    SpGEMMParams TuneSpGEMM2DAnalyticalPrecise(SpParMat<AIT, ANT, ADER>& A, SpParMat<BIT, BNT, BDER>& B, 
+                                        std::string& matpathA, std::string& matpathB){
+
+#ifdef PROFILE
+        std::string matnameA = ExtractMatName(matpathA);
+        std::string matnameB = ExtractMatName(matpathA);
+        infoPtr = new InfoLog("info-"+matnameA+"x"+matnameB+"-"+std::to_string(autotuning::rank)+".out", autotuning::rank);
+#endif
+
+        MPI_Barrier(A.getcommgrid()->GetWorld());
+
+#ifdef PROFILE
+        infoPtr->StartTimerGlobal("TuneSpGEMM2DAnalyticalPrecise");
+#endif
+        
+        typedef SpGEMM2DModelAnalyticalPrecise<AIT,ANT,ADER,BIT,BNT,BDER> ModelDerType;
+        typedef SpGEMM2DModel<ModelDerType> ModelType;
+        ModelType model;
+        model.Create(platformParams);
+        
+#ifdef PROFILE
+        infoPtr->StartTimerGlobal("Inputs");
+#endif
+        typename ModelDerType::Inputs inputs(A, B);
+#ifdef PROFILE
+        infoPtr->EndTimerGlobal("Inputs");
+        infoPtr->PrintGlobal("Inputs");
+#endif
+        
+        SpGEMMParams resultParams; 
+        resultParams = SearchBruteForce<SpGEMMParams, ModelType>(inputs, model);
+
+#ifdef PROFILE
+        infoPtr->EndTimerGlobal("TuneSpGEMM2DAnalyticalPrecise");
+        infoPtr->PrintGlobal("TuneSpGEMM2DAnalyticalPrecise");
+#endif
+
+#ifdef PROFILE
+        infoPtr->WriteInfoGlobal();
+        delete infoPtr;
+#endif
+
+        return resultParams;
+
+    }
+
+
     
     template <typename AIT, typename ANT, typename ADER, typename BIT, typename BNT, typename BDER>
     SpGEMMParams TuneSpGEMM2DXgb(SpParMat<AIT, ANT, ADER>& A, SpParMat<BIT, BNT, BDER>& B, 

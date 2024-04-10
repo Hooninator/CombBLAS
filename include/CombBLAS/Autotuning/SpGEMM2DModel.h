@@ -444,7 +444,7 @@ public:
 #ifdef DEBUG
                 debugPtr->Print(params.OutStr());
 #endif
-				auto bcastTime = this->BcastTime<AIT, ANT>(inputs, params); // Don't need Dmat here
+				auto bcastTime = this->BcastTime<AIT, ANT>(inputs, params); 
                 auto localSpGEMMTime = this->LocalSpGEMMTime(inputs, params);
                 auto mergeTime = this->MergeTime(inputs, params);
                 return bcastTime + localSpGEMMTime + mergeTime;
@@ -494,7 +494,7 @@ public:
     }
 
 
-    /* LOCAL SpGEMM */
+    /* Local SpGEMM */
     
     template <typename AIT, typename ANT, typename ADER, typename BIT, typename BNT, typename BDER>
     float LocalSpGEMMTime(Inputs<AIT,ANT,ADER,BIT,BNT,BDER>& inputs, SpGEMMParams& params) {
@@ -513,8 +513,11 @@ public:
 
     }
 
+    /* Local Merge */
+
     template <typename AIT, typename ANT, typename ADER, typename BIT, typename BNT, typename BDER>
     float MergeTime(Inputs<AIT,ANT,ADER,BIT,BNT,BDER>& inputs, SpGEMMParams& params) {
+
 		auto Ainfo = inputs.Ainfo;
 		auto Binfo = inputs.Binfo;
 
@@ -528,6 +531,210 @@ public:
  
 };
 
+
+/* Precisely compute nnz per process using symbolic grid, and use that for all phases of analytical model */
+template <typename AIT, typename ANT, typename ADER, typename BIT, typename BNT, typename BDER>
+class SpGEMM2DModelAnalyticalPrecise : public SpGEMM2DModel<SpGEMM2DModelAnalyticalPrecise<AIT,ANT,ADER,BIT,BNT,BDER>> {
+    
+public:
+    void CreateImpl(){}
+
+    template <typename IT, typename NT, typename DER>
+    class SpParMatInfoAnalyticalPrecise : public SpParMatInfo<IT,NT,DER> {
+    public:
+
+        using SpParMatInfo<IT, NT, DER>::locNnz;
+        using SpParMatInfo<IT, NT, DER>::locNcolsExact;
+        using SpParMatInfo<IT, NT, DER>::locNrowsExact;
+
+        SpParMatInfoAnalyticalPrecise() {}
+
+        SpParMatInfoAnalyticalPrecise(SpParMat<IT, NT, DER> * Mat) {
+            gridComm = Mat->getcommgrid()->GetWorld();
+            worldSize = Mat->getcommgrid()->GetSize();
+        }
+
+
+        inline MPI_Comm GetGridComm() const { return gridComm; }
+        inline int GetWorldSize() const { return worldSize; }
+
+    private:
+        MPI_Comm gridComm;
+        int worldSize;
+
+    };
+
+
+    SpGEMM2DModelAnalyticalPrecise() {
+
+		std::vector<std::string> features{
+			"nnz-A",
+			"nnz-B"
+	 	};
+		
+		nFeatures = features.size();
+		
+	}
+
+
+    class Inputs : public SpGEMM2DInputs<AIT, ANT, ADER, BIT, BNT, BDER> {
+    public:
+        Inputs(SpParMat<AIT, ANT, ADER>& A, SpParMat<BIT, BNT, BDER>& B):
+            Ainfo(&A), Binfo(&B)
+        {
+            ComputeActualDistInfo();
+             
+        }
+        
+        SpParMatInfoAnalyticalPrecise<AIT, ANT, ADER> Ainfo;
+        SpParMatInfoAnalyticalPrecise<BIT, BNT, BDER> Binfo;
+        
+        /* Store nnz per processor  */
+        struct LocInfo {
+            LocInfo(AIT locNnzA, AIT locNnzB):locNnzA(locNnzA),locNnzB(locNnzB){}
+            AIT locNnzA;
+            AIT locNnzB; //Assume they're the same type to make the MPI call easier
+        };
+        
+        
+        void ComputeActualDistInfo() {
+
+            actualDistInfo.reserve(Ainfo.GetWorldSize());
+
+            std::vector<AIT> sendBuf {Ainfo.GetLocNnz(), Binfo.GetLocNnz()};
+            AIT * recvBuf = new AIT[sendBuf.size() * Ainfo.GetWorldSize()];
+            MPI_Allgather((void*)(sendBuf.data()), sendBuf.size(), MPIType<AIT>(),
+                            (void *)(recvBuf), sendBuf.size(), MPIType<AIT>(), 
+                            Ainfo.GetGridComm());
+
+            for (int i=0; i<Ainfo.GetWorldSize(); i+=2) {
+                actualDistInfo.push_back(new LocInfo{recvBuf[i], recvBuf[i+1]});
+            }
+
+        }
+
+        std::vector<LocInfo *> actualDistInfo;
+
+    };
+
+    typedef typename Inputs::LocInfo LocInfo_t;
+
+
+    std::vector<float> PredictImpl(Inputs& inputs, std::vector<SpGEMMParams>& searchSpace) {
+        
+        std::vector<float> times(searchSpace.size());
+
+#ifdef PROFILE
+        infoPtr->StartTimerGlobal("Prediction");
+#endif
+
+        std::vector<float> allTimes(0);
+        
+        std::transform(searchSpace.begin(), searchSpace.end(), times.begin(),
+            [&inputs, &allTimes, this](auto& params) {
+
+#ifdef DEBUG
+                debugPtr->Print(params.OutStr());
+#endif
+                
+                auto featureMat = this->MakeFeatureMatImpl(inputs, params);
+
+				auto bcastTime = this->BcastTime(featureMat, params); 
+                auto localSpGEMMTime = this->LocalSpGEMMTime(featureMat, params);
+                auto mergeTime = this->MergeTime(featureMat, params);
+                
+                allTimes.clear();
+                allTimes.resize(params.GetTotalProcs());
+
+                std::transform(bcastTime.begin(), bcastTime.end(),
+                                localSpGEMMTime.begin(),
+                                allTimes.begin(), std::plus<float>());
+
+                std::transform(mergeTime.begin(), mergeTime.end(),
+                                allTimes.begin(),
+                                allTimes.begin(), std::plus<float>());
+
+                return ReduceMax(allTimes);
+
+            }
+        );
+
+#ifdef PROFILE
+        infoPtr->EndTimerGlobal("Prediction");
+#endif
+        return times;
+
+    }
+
+
+    std::vector<float> BcastTime(const std::vector<LocInfo_t *>& featureMat, SpGEMMParams& params) {
+    }
+
+
+    std::vector<float> LocalSpGEMMTime(const std::vector<LocInfo_t *>& featureMat, SpGEMMParams& params) {
+    }
+
+
+    std::vector<float> MergeTime(const std::vector<LocInfo_t *>& featureMat, SpGEMMParams& params) {
+    }
+
+    std::vector<LocInfo_t *> MakeFeatureMatImpl(Inputs& inputs, SpGEMMParams& params) {
+
+#ifdef PROFILE
+        infoPtr->StartTimer("FeatureCollection");
+#endif
+
+        auto Ainfo = inputs.Ainfo;
+        auto Binfo = inputs.Binfo;
+
+        std::vector<LocInfo_t *> featureMat(nFeatures*params.GetTotalProcs());
+
+        // For now, assume always scaling down
+        ASSERT(jobPtr->totalTasks>=params.GetTotalProcs(), "Scaling up is not yet supported");
+
+        int gridDim = params.GetGridDim();
+        int superTileDim = RoundedSqrt<int,int>(Ainfo.GetWorldSize()) / gridDim;
+
+        auto SuperTileColor = [&gridDim, &superTileDim](int rowRank, int colRank) {
+            return ( (rowRank / superTileDim) ) + ( ((colRank) / superTileDim) * gridDim );
+        };
+        
+        auto addLocInfo = [](LocInfo_t * info1, LocInfo_t * info2) {
+            return new LocInfo_t(info1->locNnzA + info2->locNnzA, info1->locNnzB + info2->locNnzB);
+        };
+
+        for (int k=0; k<Ainfo.GetWorldSize(); k++) {
+
+            int i = k % RoundedSqrt<int,int>(Ainfo.GetWorldSize());
+            int j = k / RoundedSqrt<int,int>(Ainfo.GetWorldSize());
+
+            int superTileIdx = SuperTileColor(i, j);
+            int startIdx = superTileIdx*nFeatures;
+            int endIdx = (superTileIdx+1)*nFeatures;
+
+            std::transform(inputs.actualDistInfo.begin() + (k),
+                            inputs.actualDistInfo.begin() + ((k+1)),
+                            featureMat.begin() + superTileIdx,
+                            featureMat.begin() + superTileIdx,
+                            addLocInfo);
+
+        }
+
+#ifdef PROFILE
+        infoPtr->EndTimer("FeatureCollection");
+#endif
+#ifdef DEBUG
+        debugPtr->LogVecSameLine(featureMat, "FeatureMat");
+#endif
+
+        return featureMat;
+        
+    }
+
+private:
+	int nFeatures;
+
+};
 
 #ifdef XGB_MODEL
 
@@ -1448,6 +1655,8 @@ private:
 };
 
 #endif
+
+
 
 
 }//autotuning

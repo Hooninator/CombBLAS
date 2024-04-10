@@ -240,7 +240,7 @@ T ReduceMin(std::vector<T>& v) {
 
 template <typename T>
 T ReduceMax(std::vector<T>& v) {
-    return std::reduce(v.begin(), v.end(), T(0),
+    return std::reduce(v.begin(), v.end(), std::numeric_limits<T>::min(),
         [](T currMax, T curr) {return std::max(currMax, curr);}
     );
 }
