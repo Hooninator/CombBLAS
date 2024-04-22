@@ -525,7 +525,8 @@ public:
             return (std::pow(c,2.0)*n*std::log2(std::sqrt(p))) / p;
         };
 
-        return FLOPS(Ainfo.GetGlobDensity()*Ainfo.GetNcols(), Ainfo.GetNcols(), params.GetTotalProcs())*
+        return FLOPS(Ainfo.GetGlobDensity()*Ainfo.GetNcols(), Ainfo.GetNcols(), 
+                    params.GetTotalProcs())*
                     this->platformParams.GetCostFLOP();
     }
  

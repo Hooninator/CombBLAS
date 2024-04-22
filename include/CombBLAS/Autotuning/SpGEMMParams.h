@@ -78,10 +78,8 @@ public:
 
     }
 
-    /* Given a set of parameters, construct a 3D processor grid from a communicator that only contains the processes
-     * with local ranks < ppn on nodes < n
-     */
-    std::shared_ptr<CommGrid3D> MakeGridFromParams() {
+    //TODO: I think we should split this into SpGEMM2DParams and SpGEMM3DParams...
+    std::shared_ptr<CommGrid> MakeGridFromParams() {
         //TODO: This needs some major work
         int nodeRank = (autotuning::rank / jobPtr->tasksPerNode);
         int color = static_cast<int>(nodeRank < nodes && autotuning::localRank < ppn);
@@ -102,8 +100,8 @@ public:
             ASSERT(IsPerfectSquare(newSize / layers),
             "Each 2D grid must be a perfect square, instead got " + OutStr());
 
-            std::shared_ptr<CommGrid3D> newGrid;
-            newGrid.reset(new CommGrid3D(newComm, layers, 0, 0));
+            std::shared_ptr<CommGrid> newGrid;
+            newGrid.reset(new CommGrid(newComm,  0, 0));
 
             return newGrid;
 

@@ -218,7 +218,7 @@ public:
 #endif
 
         //TODO: This makes this routine not generic since not all problems will have a 'searchspace2d' function
-        std::vector<P> searchSpace = P::ConstructSearchSpace2D(platformParams, jobPtr->nodes, 128);
+        std::vector<P> searchSpace = P::ConstructSearchSpace2D(platformParams, 64, 128);
 
         std::vector<P> localSpace;
         std::vector<int> recvCounts(autotuning::worldSize);
@@ -286,7 +286,7 @@ public:
 #endif
 
         // Search up to 32 nodes, which is fine since we do not collect distribution specific-info
-        std::vector<P> searchSpace = P::ConstructSearchSpace2D(platformParams, 32, 128);
+        std::vector<P> searchSpace = P::ConstructSearchSpace2D(platformParams, 64, 128);
         ASSERT(searchSpace.size()>0, "Search space is of size 0!");
 
 #ifdef PROFILE
