@@ -17,7 +17,7 @@ using namespace combblas;
 
 int main(int argc, char ** argv) {
     
-    /* ./<binary> <path/to/matA> <path/to/matB> <permute>*/
+    /* ./<binary> <path/to/matA> <path/to/matB> <permute> <method>*/
     
     assert(argc>3);
     
@@ -55,12 +55,57 @@ int main(int argc, char ** argv) {
         matpathB += std::string("-permute");
     }
 
-    
-    auto resultParams = tuner.TuneSpGEMM2DPhase(A, B, matpathA, matpathB);
+    double SpGEMMTime = 0;
+    double tunedSpGEMMTime = 0;
+    double redistTime = 0;
+    double tuningTime = 0;
 
+    double stime, etime;
+
+    stime = MPI_Wtime();
     Mult_AnXBn_Synch<PTTF, UT, DER>(A,B,false,false);
+    etime = MPI_Wtime();
+
+    SpGEMMTime += (etime - stime);
+
+    std::string method = std::string(argv[4]);
+    
+    stime = MPI_Wtime();
+
+    autotuning::SpGEMMParams resultParams;
+    if (!method.compare("analytical"))
+        resultParams = tuner.TuneSpGEMM2DAnalytical(A,B,matpathA,matpathB);
+    if (!method.compare("phase"))
+        resultParams = tuner.TuneSpGEMM2DPhase(A, B, matpathA, matpathB);
+    if (!method.compare("analytical-precise"))
+        resultParams = tuner.TuneSpGEMM2DAnalyticalPrecise(A, B, matpathA, matpathB);
+
+    etime = MPI_Wtime();
+    tuningTime += (etime - stime);
+
+    stime = MPI_Wtime();
+    auto tunedGrid = resultParams.MakeGridFromParams();
+
+    SpParMat<IT,UT,DER> ATuned(A.seqptr(), tunedGrid);
+    SpParMat<IT,UT,DER> BTuned(B.seqptr(), tunedGrid);
+
+    etime = MPI_Wtime();
+    redistTime = (etime - stime);
+
+    stime = MPI_Wtime();
+    Mult_AnXBn_Synch<PTTF, UT, DER>(ATuned, BTuned);
+    etime = MPI_Wtime();
+
+    tunedSpGEMMTime += (etime - stime);
     
     autotuning::Finalize();
+
+    if (rank==0) {
+        std::cout<<"SpGEMM Time: "<<SpGEMMTime<<std::endl;
+        std::cout<<"Tuned SpGEMM Time: "<<tunedSpGEMMTime<<std::endl;
+        std::cout<<"Tuning Time: "<<tuningTime<<std::endl;
+        std::cout<<"Redistribution Time: "<<redistTime<<std::endl;
+    }
 
     return 0;
 
