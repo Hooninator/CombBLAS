@@ -64,12 +64,6 @@ int main(int argc, char ** argv) {
     
         double stime, etime;
     
-        stime = MPI_Wtime();
-        Mult_AnXBn_Synch<PTTF, UT, DER>(A,B,false,false);
-        etime = MPI_Wtime();
-    
-        SpGEMMTime += (etime - stime);
-    
         int maxNodes = std::atoi(argv[4]);
         
         stime = MPI_Wtime();
@@ -83,30 +77,42 @@ int main(int argc, char ** argv) {
         bool doMult = (bool)(std::atoi(argv[5]));
     
         if (doMult) {
+
+            stime = MPI_Wtime();
+            Mult_AnXBn_Synch<PTTF, UT, DER>(A,B,false,false);
+            etime = MPI_Wtime();
+        
+            SpGEMMTime += (etime - stime);
     
             auto tunedGrid = resultParams.MakeGridFromParams();
     
             if (tunedGrid!=NULL) {
-                stime = MPI_Wtime();
-                SpParMat<IT,UT,DER> ATuned(A.seqptr(), tunedGrid);
-                SpParMat<IT,UT,DER> BTuned(B.seqptr(), tunedGrid);
-                etime = MPI_Wtime();
-    
-                redistTime = (etime - stime);
-    
-                stime = MPI_Wtime();
-                Mult_AnXBn_Synch<PTTF, UT, DER>(ATuned, BTuned);
-                etime = MPI_Wtime();
-    
-                tunedSpGEMMTime += (etime - stime);
+                {
+                    stime = MPI_Wtime();
+                    SpParMat<IT,UT,DER> ATuned(tunedGrid);
+                    SpParMat<IT,UT,DER> BTuned(tunedGrid);
+                    ATuned.ParallelReadMM(matpathA,true, maximum<double>());
+                    BTuned.ParallelReadMM(matpathB,true, maximum<double>());
+                    etime = MPI_Wtime();
+        
+                    redistTime = (etime - stime);
+        
+                    stime = MPI_Wtime();
+                    Mult_AnXBn_Synch<PTTF, UT, DER>(ATuned, BTuned, false, false);
+                    etime = MPI_Wtime();
+        
+                    tunedSpGEMMTime += (etime - stime);
+                }
+
+                if (rank==0) {
+                    std::cout<<"SpGEMM Time: "<<SpGEMMTime<<std::endl;
+                    std::cout<<"Tuned SpGEMM Time: "<<tunedSpGEMMTime<<std::endl;
+                    std::cout<<"Tuning Time: "<<tuningTime<<std::endl;
+                    std::cout<<"Redistribution Time: "<<redistTime<<std::endl;
+                }
+
             }
     
-            if (rank==0) {
-                std::cout<<"SpGEMM Time: "<<SpGEMMTime<<std::endl;
-                std::cout<<"Tuned SpGEMM Time: "<<tunedSpGEMMTime<<std::endl;
-                std::cout<<"Tuning Time: "<<tuningTime<<std::endl;
-                std::cout<<"Redistribution Time: "<<redistTime<<std::endl;
-            }
     
         }
         

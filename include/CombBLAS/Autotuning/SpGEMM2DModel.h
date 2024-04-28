@@ -441,17 +441,21 @@ public:
         std::transform(searchSpace.begin(), searchSpace.end(), times.begin(),
             [&inputs, this](auto& params) {
 
-#ifdef DEBUG
-                debugPtr->Print(params.OutStr());
-#endif
 				auto bcastTime = this->BcastTime<AIT, ANT>(inputs, params); 
                 auto localSpGEMMTime = this->LocalSpGEMMTime(inputs, params);
                 auto mergeTime = this->MergeTime(inputs, params);
+#ifdef PROFILE
+                infoPtr->Put("Params", params.OutStr());
+                infoPtr->Put("PredBcastTime", bcastTime);
+                infoPtr->Put("PredLocalSpGEMMTime", localSpGEMMTime);
+                infoPtr->Put("PredMergeTime", mergeTime);
+#endif
                 return bcastTime + localSpGEMMTime + mergeTime;
             }
         );
 
 #ifdef PROFILE
+        infoPtr->WriteInfo();
         infoPtr->EndTimerGlobal("Prediction");
 #endif
         return times;

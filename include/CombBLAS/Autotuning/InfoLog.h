@@ -43,7 +43,7 @@ public:
         ofs<<"----PREDICTION INFO----"<<std::endl;
         std::for_each(infoMap.begin(), infoMap.end(),
             [this](auto const& elem) {
-                this->ofs<<elem.first<<":"<<elem.second<<std::endl;
+                this->ofs<<elem.first<<":"<<elem.second<<" ";
             }
         );
         ofs<<std::endl;
@@ -96,12 +96,22 @@ public:
         return infoMap[label];
     }
 
+    template <typename T>
+    void Put(const std::string key, const T value) {
+        infoMap[key] = std::to_string(value);
+    }
+
     void Put(const std::string key, const std::string value) {
-        infoMap[key] = value;
+        infoMap[key] = value; 
     }
 
     std::string GetGlobal(const std::string label) {
         return infoMapGlobal[label];
+    }
+
+    template <typename T>
+    void PutGlobal(const std::string key, const T value) {
+        infoMapGlobal[key] = std::to_string(value);
     }
 
     void PutGlobal(const std::string key, const std::string value) {

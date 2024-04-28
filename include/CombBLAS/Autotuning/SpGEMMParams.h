@@ -63,11 +63,11 @@ public:
     }
 
 
-    static std::vector<SpGEMMParams> ConstructSearchSpace2D(PlatformParams& params, int nodeLimit) {
+    static std::vector<SpGEMMParams> ConstructSearchSpace2D(PlatformParams& params, uint32_t nodeLimit, uint32_t ppnLimit) {
         std::vector<SpGEMMParams> space;
-        for (int _nodes = 1; _nodes<=nodeLimit; _nodes*=2) {
-            for (int _ppn=2; _ppn<=params.GetCoresPerNode(); _ppn*=2) {
-                if (IsPerfectSquare(_ppn*_nodes) && !(_ppn==2 && _nodes==2)) {
+        for (uint32_t _nodes = 1; _nodes<=nodeLimit; _nodes*=2) {
+            for (uint32_t _ppn=1; _ppn<=ppnLimit; _ppn*=2) {
+                if (IsPerfectSquare(_ppn*_nodes) ) {
                     space.push_back(SpGEMMParams(_nodes,_ppn,1));
                 }
             }

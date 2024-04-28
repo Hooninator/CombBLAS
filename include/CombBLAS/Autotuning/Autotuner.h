@@ -31,12 +31,15 @@ public:
     template <typename AIT, typename ANT, typename ADER, typename BIT, typename BNT, typename BDER>
     SpGEMMParams TuneSpGEMM2DAnalytical(SpParMat<AIT, ANT, ADER>& A, SpParMat<BIT, BNT, BDER>& B, 
                                     std::string& matpathA, std::string& matpathB,
-                                    uint32_t maxNodes = 0){
+                                    uint32_t maxNodes = 0, uint32_t maxPPN = 0)
+    {
 
 #ifdef PROFILE
         std::string matnameA = ExtractMatName(matpathA);
         std::string matnameB = ExtractMatName(matpathA);
-        infoPtr = new InfoLog("info-"+matnameA+"x"+matnameB+"-"+std::to_string(autotuning::rank)+".out", autotuning::rank);
+        infoPtr = new InfoLog("info-"+matnameA+"x"+matnameB+"-"+
+                                std::to_string(autotuning::rank)+".out", 
+                                autotuning::rank);
 #endif
 
         MPI_Barrier(A.getcommgrid()->GetWorld());
@@ -61,9 +64,11 @@ public:
         
         if (maxNodes==0)
             maxNodes = jobPtr->nodes; //if maxNodes not specified, assume we can scale to max number of nodes in job
+        if (maxPPN==0)
+            maxPPN = platformParams.GetCoresPerNode();
                                     
         SpGEMMParams resultParams; 
-        std::vector<SpGEMMParams> searchSpace = SpGEMMParams::ConstructSearchSpace2D(platformParams, maxNodes);
+        std::vector<SpGEMMParams> searchSpace = SpGEMMParams::ConstructSearchSpace2D(platformParams, maxNodes, maxPPN);
         resultParams = SearchBruteForce<SpGEMMParams, ModelType>(inputs, model, searchSpace);
 
 #ifdef PROFILE
@@ -75,6 +80,8 @@ public:
         infoPtr->WriteInfoGlobal();
         delete infoPtr;
 #endif
+
+        MPI_Barrier(A.getcommgrid()->GetWorld());
 
         return resultParams;
 
@@ -114,7 +121,7 @@ public:
 #endif
         
         SpGEMMParams resultParams; 
-        std::vector<SpGEMMParams> searchSpace = SpGEMMParams::ConstructSearchSpace2D(platformParams, jobPtr->nodes);
+        std::vector<SpGEMMParams> searchSpace = SpGEMMParams::ConstructSearchSpace2D(platformParams, jobPtr->nodes, jobPtr->tasksPerNode);
         resultParams = SearchBruteForce<SpGEMMParams, ModelType>(inputs, model, searchSpace);
 
 #ifdef PROFILE
@@ -195,7 +202,7 @@ public:
         SpGEMM2DModelPhase::Inputs<AIT,ANT,ADER,BIT,BNT,BDER> inputs(A, B);
         
         SpGEMMParams resultParams; 
-        std::vector<SpGEMMParams> searchSpace = SpGEMMParams::ConstructSearchSpace2D(platformParams, jobPtr->nodes);
+        std::vector<SpGEMMParams> searchSpace = SpGEMMParams::ConstructSearchSpace2D(platformParams, jobPtr->nodes, jobPtr->tasksPerNode);
         resultParams = SearchBruteForce<SpGEMMParams, ModelType>(inputs, model, searchSpace);
 
 #ifdef PROFILE
@@ -266,11 +273,12 @@ public:
         model.WritePrediction(searchSpace, predictions);
 
         infoPtr->PutGlobal("BestParams", bestParams.OutStr());
-        infoPtr->PutGlobal("BestTime", std::to_string(ReduceMin(predictions)));
+        infoPtr->PutGlobal("PredSpGEMMTime", std::to_string(ReduceMin(predictions)));
+
         infoPtr->EndTimerGlobal("BruteForceSearch");
         infoPtr->PrintGlobal("BruteForceSearch");
         infoPtr->PrintGlobal("BestParams");
-        infoPtr->PrintGlobal("BestTime");
+        infoPtr->PrintGlobal("PredSpGEMMTime");
 #endif
         
         return bestParams;
