@@ -17,7 +17,7 @@ using namespace combblas;
 
 int main(int argc, char ** argv) {
     
-    /* ./<binary> <path/to/matA> <path/to/matB> <permute> <method>*/
+    /* ./<binary> <path/to/matA> <path/to/matB> <permute> <maxnodes>*/
     
     assert(argc>3);
     
@@ -33,7 +33,6 @@ int main(int argc, char ** argv) {
     
     autotuning::Init(autotuning::M_SLURM);
     autotuning::Autotuner tuner(autotuning::perlmutterParams);
-    
     
     std::shared_ptr<CommGrid> grid;
     grid.reset(new CommGrid(MPI_COMM_WORLD,0,0));
@@ -68,35 +67,32 @@ int main(int argc, char ** argv) {
 
     SpGEMMTime += (etime - stime);
 
-    std::string method = std::string(argv[4]);
+    int maxNodes = std::atoi(argv[4]);
     
     stime = MPI_Wtime();
 
     autotuning::SpGEMMParams resultParams;
-    if (!method.compare("analytical"))
-        resultParams = tuner.TuneSpGEMM2DAnalytical(A,B,matpathA,matpathB);
-    if (!method.compare("phase"))
-        resultParams = tuner.TuneSpGEMM2DPhase(A, B, matpathA, matpathB);
-    if (!method.compare("analytical-precise"))
-        resultParams = tuner.TuneSpGEMM2DAnalyticalPrecise(A, B, matpathA, matpathB);
+    resultParams = tuner.TuneSpGEMM2DAnalytical(A,B,matpathA,matpathB,maxNodes);
 
     etime = MPI_Wtime();
     tuningTime += (etime - stime);
 
-    stime = MPI_Wtime();
     auto tunedGrid = resultParams.MakeGridFromParams();
 
-    SpParMat<IT,UT,DER> ATuned(A.seqptr(), tunedGrid);
-    SpParMat<IT,UT,DER> BTuned(B.seqptr(), tunedGrid);
+    if (tunedGrid!=NULL) {
+        stime = MPI_Wtime();
+        SpParMat<IT,UT,DER> ATuned(A.seqptr(), tunedGrid);
+        SpParMat<IT,UT,DER> BTuned(B.seqptr(), tunedGrid);
+        etime = MPI_Wtime();
 
-    etime = MPI_Wtime();
-    redistTime = (etime - stime);
+        redistTime = (etime - stime);
 
-    stime = MPI_Wtime();
-    Mult_AnXBn_Synch<PTTF, UT, DER>(ATuned, BTuned);
-    etime = MPI_Wtime();
+        stime = MPI_Wtime();
+        Mult_AnXBn_Synch<PTTF, UT, DER>(ATuned, BTuned);
+        etime = MPI_Wtime();
 
-    tunedSpGEMMTime += (etime - stime);
+        tunedSpGEMMTime += (etime - stime);
+    }
     
     autotuning::Finalize();
 
@@ -106,7 +102,9 @@ int main(int argc, char ** argv) {
         std::cout<<"Tuning Time: "<<tuningTime<<std::endl;
         std::cout<<"Redistribution Time: "<<redistTime<<std::endl;
     }
-
+    
+    MPI_Finalize();
+    
     return 0;
 
 }

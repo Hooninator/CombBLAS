@@ -10,8 +10,8 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 add_library(CombBLAS src/CommGrid.cpp src/mmio.c src/MPIType.cpp src/MPIOp.cpp src/MemoryPool.cpp src/hash.cpp)
 
 # require c++14 in CombBLAS interface
-if("cxx_std_14" IN_LIST CMAKE_CXX_COMPILE_FEATURES) # Use language feature if available (CMake >= 3.8)
-  target_compile_features(CombBLAS PUBLIC cxx_std_14)
+if("cxx_std_17" IN_LIST CMAKE_CXX_COMPILE_FEATURES) # Use language feature if available (CMake >= 3.8)
+  target_compile_features(CombBLAS PUBLIC cxx_std_17)
 else()
   # Use C++14-specific features for CMake >= 3.3, which will force the appropriate language level flags.
   target_compile_features(CombBLAS PUBLIC cxx_return_type_deduction)
