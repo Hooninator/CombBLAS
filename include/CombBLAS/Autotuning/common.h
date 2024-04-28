@@ -186,6 +186,8 @@ void Finalize() {
     
     ASSERT(initCalled, "Please call autotuning::Init() first");
 
+    MPI_Barrier(MPI_COMM_WORLD);
+
 #ifdef DEBUG
     delete debugPtr;
 #endif

@@ -27,15 +27,11 @@ public:
     }
     
     
-    //TODO: Need member functions that estimate nnz per proc in 3D grid without actually creating the 3D grid
-    //actually creating the grid is likely slow if done lots of times
-    //will handle this in SymbolicSpParMat3D
-
-    
     /* TUNING */
     template <typename AIT, typename ANT, typename ADER, typename BIT, typename BNT, typename BDER>
     SpGEMMParams TuneSpGEMM2DAnalytical(SpParMat<AIT, ANT, ADER>& A, SpParMat<BIT, BNT, BDER>& B, 
-                                    std::string& matpathA, std::string& matpathB){
+                                    std::string& matpathA, std::string& matpathB,
+                                    uint32_t maxNodes = 0){
 
 #ifdef PROFILE
         std::string matnameA = ExtractMatName(matpathA);
@@ -63,8 +59,12 @@ public:
         infoPtr->PrintGlobal("Inputs");
 #endif
         
+        if (maxNodes==0)
+            maxNodes = jobPtr->nodes; //if maxNodes not specified, assume we can scale to max number of nodes in job
+                                    
         SpGEMMParams resultParams; 
-        resultParams = SearchBruteForce<SpGEMMParams, ModelType>(inputs, model);
+        std::vector<SpGEMMParams> searchSpace = SpGEMMParams::ConstructSearchSpace2D(platformParams, maxNodes);
+        resultParams = SearchBruteForce<SpGEMMParams, ModelType>(inputs, model, searchSpace);
 
 #ifdef PROFILE
         infoPtr->EndTimerGlobal("TuneSpGEMM2DAnalytical");
@@ -114,7 +114,8 @@ public:
 #endif
         
         SpGEMMParams resultParams; 
-        resultParams = SearchBruteForce<SpGEMMParams, ModelType>(inputs, model);
+        std::vector<SpGEMMParams> searchSpace = SpGEMMParams::ConstructSearchSpace2D(platformParams, jobPtr->nodes);
+        resultParams = SearchBruteForce<SpGEMMParams, ModelType>(inputs, model, searchSpace);
 
 #ifdef PROFILE
         infoPtr->EndTimerGlobal("TuneSpGEMM2DAnalyticalPrecise");
@@ -194,7 +195,8 @@ public:
         SpGEMM2DModelPhase::Inputs<AIT,ANT,ADER,BIT,BNT,BDER> inputs(A, B);
         
         SpGEMMParams resultParams; 
-        resultParams = SearchBruteForce<SpGEMMParams>(inputs, model);
+        std::vector<SpGEMMParams> searchSpace = SpGEMMParams::ConstructSearchSpace2D(platformParams, jobPtr->nodes);
+        resultParams = SearchBruteForce<SpGEMMParams, ModelType>(inputs, model, searchSpace);
 
 #ifdef PROFILE
         infoPtr->EndTimerGlobal("TuneSpGEMM2DPhase");
@@ -211,14 +213,11 @@ public:
     }
     
     template <typename P, typename M, typename I>
-    P SearchBruteForce(I& inputs, M& model) {
+    P SearchBruteForce(I& inputs, M& model, std::vector<P>& searchSpace) {
 
 #ifdef PROFILE
         infoPtr->StartTimerGlobal("BruteForceSearch");
 #endif
-
-        //TODO: This makes this routine not generic since not all problems will have a 'searchspace2d' function
-        std::vector<P> searchSpace = P::ConstructSearchSpace2D(platformParams, 64, 128);
 
         std::vector<P> localSpace;
         std::vector<int> recvCounts(autotuning::worldSize);
@@ -279,14 +278,12 @@ public:
 
 
     template <typename P, typename M, typename I>
-    P SearchInference(I& inputs, M& model) {
+    P SearchInference(I& inputs, M& model, std::vector<P>& searchSpace) {
         
 #ifdef PROFILE
         infoPtr->StartTimerGlobal("InferenceSearch");
 #endif
 
-        // Search up to 32 nodes, which is fine since we do not collect distribution specific-info
-        std::vector<P> searchSpace = P::ConstructSearchSpace2D(platformParams, 64, 128);
         ASSERT(searchSpace.size()>0, "Search space is of size 0!");
 
 #ifdef PROFILE

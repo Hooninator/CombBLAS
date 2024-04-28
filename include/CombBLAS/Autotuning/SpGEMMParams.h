@@ -63,11 +63,10 @@ public:
     }
 
 
-    static std::vector<SpGEMMParams> ConstructSearchSpace2D(PlatformParams& params, int nodeLimit,
-                                                            int tasksPerNode) {
+    static std::vector<SpGEMMParams> ConstructSearchSpace2D(PlatformParams& params, int nodeLimit) {
         std::vector<SpGEMMParams> space;
         for (int _nodes = 1; _nodes<=nodeLimit; _nodes*=2) {
-            for (int _ppn=2; _ppn<=tasksPerNode; _ppn*=2) {
+            for (int _ppn=2; _ppn<=params.GetCoresPerNode(); _ppn*=2) {
                 if (IsPerfectSquare(_ppn*_nodes) && !(_ppn==2 && _nodes==2)) {
                     space.push_back(SpGEMMParams(_nodes,_ppn,1));
                 }
@@ -101,11 +100,12 @@ public:
             "Each 2D grid must be a perfect square, instead got " + OutStr());
 
             std::shared_ptr<CommGrid> newGrid;
-            newGrid.reset(new CommGrid(newComm,  0, 0));
+            newGrid.reset(new CommGrid(newComm, 0, 0));
 
             return newGrid;
 
         } else {
+            //TODO: We need something different here, this is cumbersome for the user to have to deal with
             return NULL;
         }
 
