@@ -78,19 +78,34 @@ public:
     }
 
     //TODO: I think we should split this into SpGEMM2DParams and SpGEMM3DParams...
-    std::shared_ptr<CommGrid> MakeGridFromParams() {
-        //TODO: This needs some major work
-        int nodeRank = (autotuning::rank / jobPtr->tasksPerNode);
-        int color = static_cast<int>(nodeRank < nodes && autotuning::localRank < ppn);
-        int key = autotuning::rank;
+    std::shared_ptr<CommGrid> MakeGridFromParams() 
+    {
+
+        std::vector<int> ranks; // Ranks to include in the new communicator
+        ranks.reserve(nodes*ppn);
+        
+        // Get all ranks within this parameter object's nodes and ppn
+        for (int rank=0; rank<autotuning::worldSize; rank++)
+        {
+            int nodeRank = rank / jobPtr->tasksPerNode;
+            int localRank = rank % jobPtr->tasksPerNode;
+            if (nodeRank < nodes && localRank < ppn)
+            {
+                ranks.push_back(rank);
+            }
+        }
+
+        // Make the new group 
+        MPI_Group newGroup;
+        MPI_Group_incl(MPI_COMM_WORLD, ranks.size(), ranks.data(), &newGroup);
 
         MPI_Comm newComm;
-        MPI_Comm_split(MPI_COMM_WORLD, color, key, &newComm);
+        MPI_Comm_create_group(MPI_COMM_WORLD, newGroup, 0, &newComm);
 
         int newSize;
         MPI_Comm_size(newComm, &newSize);
 
-        if (color==1) {
+        if (newComm != MPI_COMM_NULL) {
 
             ASSERT(newSize==nodes*ppn,
             "Expected communicator size to be " + std::to_string(nodes*ppn) + ", but it was "
@@ -105,11 +120,14 @@ public:
             return newGrid;
 
         } else {
-            //TODO: We need something different here, this is cumbersome for the user to have to deal with
             return NULL;
         }
 
     }
+
+
+    template <typename IT, typename NT, typename DER>
+    DER ReDistributeMat(SpMat<IT, NT, DER>& mat,
 
     
     /* Utility functions for getting MPI Communicators across symbolic 3D grid */
