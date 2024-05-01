@@ -96,8 +96,11 @@ public:
         }
 
         // Make the new group 
+        MPI_Group worldGroup;
+        MPI_Comm_group(MPI_COMM_WORLD, &worldGroup);
+
         MPI_Group newGroup;
-        MPI_Group_incl(MPI_COMM_WORLD, ranks.size(), ranks.data(), &newGroup);
+        MPI_Group_incl(worldGroup, ranks.size(), ranks.data(), &newGroup);
 
         MPI_Comm newComm;
         MPI_Comm_create_group(MPI_COMM_WORLD, newGroup, 0, &newComm);
@@ -127,7 +130,9 @@ public:
 
 
     template <typename IT, typename NT, typename DER>
-    DER ReDistributeMat(SpMat<IT, NT, DER>& mat,
+    DER ReDistributeMat(SpMat<IT, NT, DER>& mat)
+    {
+    }
 
     
     /* Utility functions for getting MPI Communicators across symbolic 3D grid */

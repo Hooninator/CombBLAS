@@ -139,6 +139,7 @@ public:
     }
 
 
+#ifdef XGB
     
     template <typename AIT, typename ANT, typename ADER, typename BIT, typename BNT, typename BDER>
     SpGEMMParams TuneSpGEMM2DXgb(SpParMat<AIT, ANT, ADER>& A, SpParMat<BIT, BNT, BDER>& B, 
@@ -176,7 +177,10 @@ public:
         return resultParams;
 
     }
+#endif
 
+
+#ifdef XGB
 
     //TODO: This should probably just be a tuneinference function with a template parameter
     template <typename AIT, typename ANT, typename ADER, typename BIT, typename BNT, typename BDER>
@@ -218,6 +222,7 @@ public:
         return resultParams;
 
     }
+#endif
     
     template <typename P, typename M, typename I>
     P SearchBruteForce(I& inputs, M& model, std::vector<P>& searchSpace) {

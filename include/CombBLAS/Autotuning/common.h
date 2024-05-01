@@ -91,7 +91,8 @@ namespace combblas {
 namespace autotuning {
 
 enum jobManager {
-    M_SLURM
+    M_SLURM,
+    M_OMPI
 } typedef JobManager;
 
 
@@ -106,6 +107,12 @@ public:
             case M_SLURM:
             {
                 SetJobInfoSlurm();
+                break;
+            }
+
+            case M_OMPI:
+            {
+                SetJobInfoOpenMPI();
                 break;
             }
 
@@ -130,6 +137,20 @@ public:
             totalGPUs = std::atoi(std::getenv("SLURM_GPUS"));
         if (std::getenv("SLURM_GPUS_PER_NODE")!=nullptr)
             gpusPerNode = std::atoi(std::getenv("SLURM_GPUS_PER_NODE"));
+    }
+
+    void SetJobInfoOpenMPI()
+    {
+
+        MPI_Comm_size(MPI_COMM_WORLD, &totalTasks);
+
+        MPI_Comm localComm;
+        MPI_Comm_split_type(MPI_COMM_WORLD, MPI_COMM_TYPE_SHARED, 0, MPI_INFO_NULL, &localComm);
+
+        MPI_Comm_size(localComm, &tasksPerNode);
+
+        nodes = totalTasks / tasksPerNode;
+
     }
 
     int nodes;

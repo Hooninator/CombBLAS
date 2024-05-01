@@ -80,6 +80,15 @@ PlatformParams perlmutterParams(3.9, //alpha
                                 39598, //memBW, measured using STREAM
                                 1e-3   //cost for memory movement, right now totally random
                                 );
+PlatformParams fractusParams(4.2, //alpha
+                             15676.06, //internode beta
+                             15676.06, //intranode beta -- NOTE: These are rough values
+                             32, 2,
+                             0.0,
+                             5.2e-9,
+                             0,
+                             0
+                             );
 
 } //autotuning
 }//combblas
