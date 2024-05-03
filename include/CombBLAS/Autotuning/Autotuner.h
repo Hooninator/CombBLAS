@@ -207,7 +207,7 @@ public:
         
         SpGEMMParams resultParams; 
         std::vector<SpGEMMParams> searchSpace = SpGEMMParams::ConstructSearchSpace2D(platformParams, jobPtr->nodes, jobPtr->tasksPerNode);
-        resultParams = SearchBruteForce<SpGEMMParams, ModelType>(inputs, model, searchSpace);
+        resultParams = ParSearchBruteForce<SpGEMMParams, ModelType>(inputs, model, searchSpace);
 
 #ifdef PROFILE
         infoPtr->EndTimerGlobal("TuneSpGEMM2DPhase");
@@ -223,9 +223,47 @@ public:
 
     }
 #endif
-    
+
     template <typename P, typename M, typename I>
     P SearchBruteForce(I& inputs, M& model, std::vector<P>& searchSpace) {
+
+#ifdef PROFILE
+        infoPtr->StartTimerGlobal("BruteForceSearch");
+#endif
+
+        ASSERT(searchSpace.size()>0, "Global search space is of size 0!");
+
+#ifdef PROFILE
+        infoPtr->PutGlobal("SearchSpaceSize", std::to_string(searchSpace.size()));
+#endif
+
+        std::vector<float> predictions = model.Predict(inputs, searchSpace);
+
+#ifdef DEBUG
+        debugPtr->Print("Searching for min");
+#endif
+
+        P bestParams;  
+        bestParams = searchSpace[std::distance(predictions.begin(), std::min_element(predictions.begin(), predictions.end()))];
+
+#ifdef PROFILE
+
+        model.WritePrediction(searchSpace, predictions);
+
+        infoPtr->PutGlobal("BestParams", bestParams.OutStr());
+        infoPtr->PutGlobal("PredSpGEMMTime", std::to_string(ReduceMin(predictions)));
+
+        infoPtr->EndTimerGlobal("BruteForceSearch");
+        infoPtr->PrintGlobal("BruteForceSearch");
+        infoPtr->PrintGlobal("BestParams");
+        infoPtr->PrintGlobal("PredSpGEMMTime");
+#endif
+        
+        return bestParams;
+    }
+    
+    template <typename P, typename M, typename I>
+    P ParSearchBruteForce(I& inputs, M& model, std::vector<P>& searchSpace) {
 
 #ifdef PROFILE
         infoPtr->StartTimerGlobal("BruteForceSearch");
