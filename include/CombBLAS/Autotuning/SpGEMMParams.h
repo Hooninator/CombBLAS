@@ -129,9 +129,70 @@ public:
     }
 
 
-    template <typename IT, typename NT, typename DER>
-    DER ReDistributeMat(SpMat<IT, NT, DER>& mat)
+    template <typename DER>
+    DER * ReDistributeSpMat(DER * mat, std::shared_ptr<CommGrid>& oldGrid)
     {
+     
+        // Same size. Just return this processe's seqptr 
+        if (oldGrid->GetSize() == this->totalProcs)
+            return mat; 
+
+        // Scaling up
+        if (oldGrid->GetSize() > this->totalProcs)
+        {
+        }
+
+        // Scaling down
+        if (oldGrid->GetSize() < this->totalProcs)
+        {
+            int superRows = RoundedSqrt<int, int>(this->totalProcs);
+            int superCols = superRows;
+            int rowRank = oldGrid->GetRankInProcRow();
+            int colRank = oldGrid->GetRankInProcCol();
+            
+            auto GetSuperTileIdx = [](int rowRank, int colRank,
+                                    int superRows, int superCols,
+                                    int oldCols)
+            { 
+                return (rowRank / superCols) * superCols + (colRank / superRows) * (oldCols * superRows);
+            };
+
+            auto GetSuperTileRank = [](int rowRank, int colRank,
+                                        int superRows, int superCols)
+            {
+                return (rowRank % superCols) + (colRank * superRows);
+            };
+
+            int superTileIdx = GetSuperTileIdx(rowRank, colRank, superRows, superCols, oldGrid->GetGridCols());
+            int superTileRank = GetSuperTileRank(rowRank, colRank, superRows, superCols);
+
+            // Create the communicator for each supertile
+            MPI_Comm superTileComm;
+            MPI_Comm_split(MPI_COMM_WORLD, superTileIdx, superTileRank, &superTileComm);
+
+            //Gather the matrix on rank 0 of each supertile 
+#ifdef PROFILE
+            infoPtr->StartTimerGlobal("Redist");
+#endif
+            DER * newMat; 
+
+            // Setup receieve and send matrices 
+            if (superTileRank==0) 
+                newMat = new DER(); //going to be receiving matrices
+            else
+                newMat = mat; //going to be sending my local matrix
+
+            SpParHelper::GatherMatrix(superTileComm, *newMat, 0);
+
+
+#ifdef PROFILE
+            infoPtr->EndTimerGlobal("Redist");
+#endif
+            return newMat;
+
+
+        }
+
     }
 
     
