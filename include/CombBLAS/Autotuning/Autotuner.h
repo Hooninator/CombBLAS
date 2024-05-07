@@ -65,7 +65,7 @@ public:
         if (maxNodes==0)
             maxNodes = jobPtr->nodes; //if maxNodes not specified, assume we can scale to max number of nodes in job
         if (maxPPN==0)
-            maxPPN = platformParams.GetCoresPerNode();
+            maxPPN = jobPtr->tasksPerNode;
                                     
         SpGEMMParams resultParams; 
         std::vector<SpGEMMParams> searchSpace = SpGEMMParams::ConstructSearchSpace2D(platformParams, maxNodes, maxPPN);

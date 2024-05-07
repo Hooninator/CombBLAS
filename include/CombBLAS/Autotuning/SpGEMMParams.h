@@ -77,6 +77,13 @@ public:
 
     }
 
+    
+    static SpGEMMParams GetDefaultParams()
+    {
+        return SpGEMMParams(jobPtr->nodes, jobPtr->tasksPerNode, 1);
+    }
+
+
     //TODO: I think we should split this into SpGEMM2DParams and SpGEMM3DParams...
     std::shared_ptr<CommGrid> MakeGridFromParams() 
     {
@@ -129,69 +136,123 @@ public:
     }
 
 
+    //TODO: This should be moved to a separate class
     template <typename DER>
-    DER * ReDistributeSpMat(DER * mat, std::shared_ptr<CommGrid>& oldGrid)
+    DER * ReDistributeSpMat(DER * mat, SpGEMMParams& oldParams)
     {
+
+        auto newParams = *(this);
+
+        auto isInNewGrid = [&newParams](int rank )
+        {
+            int nodeRank = rank / jobPtr->tasksPerNode;
+            int localRank = rank % jobPtr->tasksPerNode;
+            return nodeRank < newParams.GetNodes() && localRank < newParams.GetPPN();
+        };
+
      
-        // Same size. Just return this processe's seqptr 
-        if (oldGrid->GetSize() == this->totalProcs)
+        // Same size. Just return this process seqptr 
+        if (oldParams.GetTotalProcs() == newParams.totalProcs)
             return mat; 
 
         // Scaling up
-        if (oldGrid->GetSize() > this->totalProcs)
+        if (oldParams.GetTotalProcs() < newParams.totalProcs)
         {
         }
 
         // Scaling down
-        if (oldGrid->GetSize() < this->totalProcs)
+        if (oldParams.GetTotalProcs() > newParams.totalProcs)
         {
-            int superRows = RoundedSqrt<int, int>(this->totalProcs);
-            int superCols = superRows;
-            int rowRank = oldGrid->GetRankInProcRow();
-            int colRank = oldGrid->GetRankInProcCol();
-            
+
+            // Given the rank of a process in COMM_WORLD, get the rank of that process in old grid
+            std::map<int, int> worldToOldGridRank;
+            // Given the rank of a process in old grid, get the rank of that procss in COMM_WORLD
+            std::map<int, int> oldGridToWorldRank;
+
+            int i=0;
+            for (int node=0; node<oldParams.nodes; node++) 
+            {
+                for (int p=0; p<oldParams.ppn; p++) 
+                {
+                    oldGridToWorldRank[i] = p + node * oldParams.ppn;
+                    worldToOldGridRank[ p + node * oldParams.ppn] = i;
+                    i++;
+                }
+            }
+
+            // Given the rank of a process in COMM_WORLD, get the rank of that process in new grid
+            std::map<int, int> worldToNewGridRank;
+            // Given the rank of a process in new grid, get the rank of that process in COMM_WORLD 
+            std::map<int, int> newGridToWorldRank;
+
+            i = 0;
+            for (int node=0; node<newParams.nodes; node++) 
+            {
+                for (int p=0; p<newParams.ppn; p++) 
+                {
+                    newGridToWorldRank[i] = p + node * newParams.ppn;
+                    worldToNewGridRank[p + node * newParams.ppn] = i;
+                    i++;
+                }
+            }
+
+            int superTileDim = RoundedSqrt<int,int>(oldParams.totalProcs) / RoundedSqrt<int,int>(newParams.totalProcs);
+            int superTileSize = superTileDim * superTileDim;
+
+            int oldGridDim = RoundedSqrt<int,int>(oldParams.totalProcs);
+            int oldGridSize = oldGridDim * oldGridDim;
+            int rankInOldGridRow = worldToOldGridRank[rank] % oldGridDim;
+            int rankInOldGridCol = worldToOldGridRank[rank] / oldGridDim;
+
+            int newGridDim = RoundedSqrt<int,int>(newParams.totalProcs);
+            int newGridSize = newGridDim * newGridDim;
+
             auto GetSuperTileIdx = [](int rowRank, int colRank,
                                     int superRows, int superCols,
                                     int oldCols)
             { 
-                return (rowRank / superCols) * superCols + (colRank / superRows) * (oldCols * superRows);
+                return (rowRank / superCols)  + (colRank / superRows) * ( superRows);
             };
 
-            auto GetSuperTileRank = [](int rowRank, int colRank,
-                                        int superRows, int superCols)
+            // Map each rank to a receiving rank in the new grid
+
+            // Figure out which rank I'm sending to
+            // This should be the rank in new grid of the process I'm sending to
+            int sendRankIdx = GetSuperTileIdx(rankInOldGridRow, rankInOldGridCol,
+                                                superTileDim, superTileDim,
+                                                oldGridDim);
+            int sendRank = newGridToWorldRank[sendRankIdx];
+
+#ifdef DEBUG
+            debugPtr->Log("Rank " + std::to_string(rank) + " sending to new grid rank " + std::to_string(sendRank));
+            debugPtr->Log("Rank " + std::to_string(rank) + " sending to world rank " + std::to_string(sendRank));
+#endif
+
+            std::vector<int> recvRanks;
+            if (isInNewGrid(rank))
             {
-                return (rowRank % superCols) + (colRank * superRows);
-            };
+                for (auto const& elem : oldGridToWorldRank)
+                {
+                    int currOldGridRank = elem.first;
+                    int currRankInOldGridRow = currOldGridRank % oldGridDim;
+                    int currRankInOldGridCol = currOldGridRank / oldGridDim;
 
-            int superTileIdx = GetSuperTileIdx(rowRank, colRank, superRows, superCols, oldGrid->GetGridCols());
-            int superTileRank = GetSuperTileRank(rowRank, colRank, superRows, superCols);
-
-            // Create the communicator for each supertile
-            MPI_Comm superTileComm;
-            MPI_Comm_split(MPI_COMM_WORLD, superTileIdx, superTileRank, &superTileComm);
-
-            //Gather the matrix on rank 0 of each supertile 
-#ifdef PROFILE
-            infoPtr->StartTimerGlobal("Redist");
+                    int sendRankInOldGrid = GetSuperTileIdx(currRankInOldGridRow, currRankInOldGridCol,
+                                                            superTileDim, superTileDim,
+                                                            oldGridDim);
+                    int sendRankWorld = oldGridToWorldRank[sendRankInOldGrid];
+                    if (sendRankWorld==rank)
+                        recvRanks.push_back(currOldGridRank);
+                }
+#ifdef DEBUG
+                debugPtr->LogVecSameLine(recvRanks, "Recv Ranks");
 #endif
-            DER * newMat; 
+            }
 
-            // Setup receieve and send matrices 
-            if (superTileRank==0) 
-                newMat = new DER(); //going to be receiving matrices
-            else
-                newMat = mat; //going to be sending my local matrix
-
-            SpParHelper::GatherMatrix(superTileComm, *newMat, 0);
-
-
-#ifdef PROFILE
-            infoPtr->EndTimerGlobal("Redist");
-#endif
-            return newMat;
-
-
+            SpParHelper::SendRecvMatrix(recvRanks, sendRank, mat);
         }
+
+        MPI_Barrier(MPI_COMM_WORLD);
 
     }
 

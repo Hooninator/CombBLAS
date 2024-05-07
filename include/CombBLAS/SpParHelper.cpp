@@ -670,8 +670,7 @@ void SpParHelper::GatherMatrix(MPI_Comm & comm1d, SpMat<IT,NT,DER> & Matrix, int
     if(myrank != root)
     {
         Matrix.Create(essentials);		// allocate memory for arrays
-    }
-     */
+    }*/
     
     Arr<IT,NT> arrinfo = Matrix.GetArrays();
     std::vector<std::vector<int>> recvcnt_ind(arrinfo.indarrs.size());
@@ -716,6 +715,93 @@ void SpParHelper::GatherMatrix(MPI_Comm & comm1d, SpMat<IT,NT,DER> & Matrix, int
     }
 }
 
+template<typename IT, typename NT, typename DER>	
+void SpParHelper::SendRecvMatrix(std::vector<int> recvRanks, int sendRank,
+                            SpMat<IT,NT,DER> * Matrix)
+{
+
+    std::vector<std::tuple<IT, IT, NT>> sendTuples; 
+    sendTuples.reserve(Matrix->getnnz());
+    for (auto colIter = Matrix->begcol(); colIter != Matrix->endcol(); colIter++)
+    {
+        for (auto nzIter = Matrix->begnz(colIter); nzIter != Matrix->endnz(colIter); nzIter++)
+        {
+            sendTuples.push_back({colIter.colid(), nzIter.rowid(), nzIter.value()});
+        }
+    }
+
+    /* First, send buffer sizes to all receiving processes */
+    IT sendCount = sendTuples.size();
+    IT locRows = Matrix->getnrow();
+    IT locCols = Matrix->getncol();
+
+    IT sendBuf[] = {sendCount, locRows, locCols};
+
+    MPI_Request sendReq;
+    MPI_Isend((void*)(sendBuf), 3, MPIType<IT>(),
+                sendRank, 0, MPI_COMM_WORLD, &sendReq);
+
+    std::vector<std::vector<IT>> recvCounts(recvRanks.size());
+
+    MPI_Request * recvReqs = new MPI_Request[recvRanks.size()];
+    
+    for (int i=0; i<recvRanks.size(); i++)
+    {
+        recvCounts[i].resize(3);
+
+        MPI_Irecv((void*)(recvCounts[i].data()), 3, MPIType<IT>(),
+                    recvRanks[i], 0, MPI_COMM_WORLD, &(recvReqs[i]));
+
+    }
+
+    MPI_Waitall(recvRanks.size(), recvReqs, MPI_STATUSES_IGNORE);
+    delete[] recvReqs;
+
+    MPI_Wait(&sendReq, MPI_STATUS_IGNORE);
+
+
+    /* Now, allocate buffers on each receiving process, then send the actual data */
+    std::vector<std::tuple<IT, IT, NT>> recvTuples;
+    IT recvTuplesCount = 0;
+    IT newLocRows = 0;
+    IT newLocCols = 0;
+
+    for (int i=0; i<recvCounts.size(); i++)
+    {
+        recvTuplesCount += recvCounts[i][0];
+        newLocRows += recvCounts[i][1];
+        newLocCols += recvCounts[i][2];
+    }
+
+    recvTuples.resize(recvTuplesCount);
+
+    MPI_Request sendReq2;
+    MPI_Isend((void*)(sendTuples.data()), sendTuples.size(), MPIType<std::tuple<IT, IT, NT>>(),
+                        sendRank, 0, MPI_COMM_WORLD, &sendReq2);
+
+    MPI_Request * recvReqs2 = new MPI_Request[recvRanks.size()];
+
+    int offset = 0;
+    for (int i=0; i<recvRanks.size(); i++)
+    {
+        MPI_Irecv((void*)(recvTuples.data() + offset), recvCounts[i][0], MPIType<std::tuple<IT,IT,NT>>(),
+                    recvRanks[i], 0, MPI_COMM_WORLD, &(recvReqs2[i]));
+        offset += recvCounts[i][0];
+    }
+
+    MPI_Waitall(recvRanks.size(), recvReqs2, MPI_STATUSES_IGNORE);
+    MPI_Wait(&sendReq2, MPI_STATUS_IGNORE);
+
+    /* Now, construct the new matrix on this rank */
+    SpTuples<IT,NT> * finalTuples = new SpTuples<IT,NT>(recvTuplesCount, newLocRows, newLocCols, 
+                                                        recvTuples.data(), 
+                                                        false, false);
+    delete Matrix;
+    DER * newMat = new DER(*finalTuples, false);
+    Matrix = newMat;
+
+    delete[] recvReqs2;
+}
 
 template <class IT, class NT, class DER>
 void SpParHelper::SetWindows(MPI_Comm & comm1d, const SpMat< IT,NT,DER > & Matrix, std::vector<MPI_Win> & arrwin) 

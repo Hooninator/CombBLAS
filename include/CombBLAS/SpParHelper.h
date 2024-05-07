@@ -87,8 +87,13 @@ public:
 	template<typename IT, typename NT, typename DER>	
 	static void IBCastMatrix(MPI_Comm & comm1d, SpMat<IT,NT,DER> & Matrix, const std::vector<IT> & essentials, int root, std::vector<MPI_Request> & indarrayReq , std::vector<MPI_Request> & numarrayReq);
     
-    	template<typename IT, typename NT, typename DER>
-    	static void GatherMatrix(MPI_Comm & comm1d, SpMat<IT,NT,DER> & Matrix, int root);
+	template<typename IT, typename NT, typename DER>	
+    static void GatherMatrix(MPI_Comm & comm1d, SpMat<IT,NT,DER> & Matrix, int root);
+
+	template<typename IT, typename NT, typename DER>	
+    static void SendRecvMatrix(std::vector<int> recvRanks, int sendRank,
+                                SpMat<IT,NT,DER> * Matrix);
+
 
 	template<typename IT, typename NT, typename DER>
 	static void SetWindows(MPI_Comm & comm1d, const SpMat< IT,NT,DER > & Matrix, std::vector<MPI_Win> & arrwin);
