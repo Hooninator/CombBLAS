@@ -91,9 +91,12 @@ public:
     static void GatherMatrix(MPI_Comm & comm1d, SpMat<IT,NT,DER> & Matrix, int root);
 
 	template<typename IT, typename NT, typename DER>	
-    static void SendRecvMatrix(std::vector<int> recvRanks, int sendRank,
-                                SpMat<IT,NT,DER> * Matrix);
+    static void SingleSendMultRecvMatrix(std::vector<int> recvRanks, int sendRank,
+                                        SpMat<IT,NT,DER> * Matrix);
 
+	template<typename IT, typename NT, typename DER>	
+    static void MultSendSingleRecvMatrix(std::vector<int> sendRanks, int recvRank,
+                                        SpMat<IT,NT,DER> * Matrix);
 
 	template<typename IT, typename NT, typename DER>
 	static void SetWindows(MPI_Comm & comm1d, const SpMat< IT,NT,DER > & Matrix, std::vector<MPI_Win> & arrwin);

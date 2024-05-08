@@ -716,7 +716,7 @@ void SpParHelper::GatherMatrix(MPI_Comm & comm1d, SpMat<IT,NT,DER> & Matrix, int
 }
 
 template<typename IT, typename NT, typename DER>	
-void SpParHelper::SendRecvMatrix(std::vector<int> recvRanks, int sendRank,
+void SpParHelper::SingleSendMultRecvMatrix(std::vector<int> recvRanks, int sendRank,
                             SpMat<IT,NT,DER> * Matrix)
 {
 
@@ -801,6 +801,22 @@ void SpParHelper::SendRecvMatrix(std::vector<int> recvRanks, int sendRank,
     Matrix = newMat;
 
     delete[] recvReqs2;
+}
+
+
+template<typename IT, typename NT, typename DER>	
+void SpParHelper::MultSendSingleRecvMatrix(std::vector<int> sendRanks, int recvRank,
+                                            SpMat<IT,NT,DER> * Matrix)
+{
+    // Mapping lambda used to map a tuple to a sendRank 
+
+    // First, create 2d vector storing tuples I send to all other ranks
+
+    // Now, compute recv buffer sizes for all ranks I send to, and send those sizes to sendRanks
+
+    // Finally, allocate recvTuples buffer, then send/recv the actual sptuples
+    
+    // Construct new matrix on this rank
 }
 
 template <class IT, class NT, class DER>
