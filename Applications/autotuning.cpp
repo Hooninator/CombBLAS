@@ -87,17 +87,20 @@ int main(int argc, char ** argv) {
 
         SpParMat<IT,UT,DER> Adown(grid );
         Adown.ParallelReadMM(matpathA, true, maximum<double>());
-        Adown.ParallelWriteMM("./stomach-down-correct.mtx", true);
+        Adown.ParallelWriteMM("./stomach-correct.mtx", true);
 
         // Re-distribute from default to smaller process grid
         DER * AdownLocalRedist = scalingDownParams.ReDistributeSpMat(Adown.seqptr(), defaultParams);
 
         auto smallGrid = scalingDownParams.MakeGridFromParams();
+        /*
         if (smallGrid!=NULL) 
         {
+            std::cout<<rank<<" doing write of scaled down mtx"<<std::endl;
             SpParMat<IT,UT,DER> AdownRedist(AdownLocalRedist, smallGrid);
             AdownRedist.ParallelWriteMM("./stomach-down.mtx", true );
-        }
+        }*/
+        //TODO: Fix destructor bs
 
         if (rank==0)
             std::cout<<"Scaling down done"<<std::endl;
@@ -105,20 +108,20 @@ int main(int argc, char ** argv) {
         ///////////////////////////
         /**** END TEST SCALING DOWN ****/
        
+        MPI_Barrier(MPI_COMM_WORLD);
 
         /**** TEST SCALING UP ****/
         ///////////////////////////
         if (rank==0)
             std::cout<<"Testing scaling up..."<<std::endl;
 
-        std::cout<<AdownLocalRedist->getnnz()<<std::endl;
-
-        MPI_Barrier(MPI_COMM_WORLD);
-
         // Re-redistribute from smaller to default process grid
         DER * AupLocalRedist = defaultParams.ReDistributeSpMat(AdownLocalRedist, scalingDownParams);
 
-        MPI_Barrier(MPI_COMM_WORLD);
+
+        SpParMat<IT,UT,DER> AupRedist(AupLocalRedist, grid);
+        AupRedist.ParallelWriteMM("./stomach-up.mtx", true);
+
 
         if (rank==0)
             std::cout<<"Scaling up done"<<std::endl;
@@ -126,6 +129,7 @@ int main(int argc, char ** argv) {
         /**** END TEST SCALING UP ****/
         ///////////////////////////
     
+
         bool doMult = (bool)(std::atoi(argv[5]));
     
         //Test multiplication with redistributed matrices

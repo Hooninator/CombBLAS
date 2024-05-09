@@ -728,6 +728,7 @@ DER* SpParHelper::SingleSendMultRecvMatrix(std::vector<int> recvRanks, int sendR
     IT buf[] = {locCols, locRows};
 
     // Make sure empty matrices don't automatically win the min allreduce
+    // There has to be a better way to do this
     if (buf[0]==0)
         buf[0]=std::numeric_limits<IT>::max();
 
@@ -826,12 +827,16 @@ DER* SpParHelper::SingleSendMultRecvMatrix(std::vector<int> recvRanks, int sendR
     MPI_Waitall(recvRanks.size(), recvReqs2, MPI_STATUSES_IGNORE);
     MPI_Wait(&sendReq2, MPI_STATUS_IGNORE);
 
-    for (auto& t : recvTuples)
+    SpParHelper::Print("recvTuples.size(): " + std::to_string(recvTuples.size()) + "\n");
+
+    /*
+    for (int i=0; i<recvTuples.size(); i++)
     {
+        auto& t = recvTuples[i];
         std::stringstream ss;
         ss<<std::get<0>(t)<<","<<std::get<1>(t)<<","<<std::get<2>(t)<<std::endl;
         SpParHelper::PrintFile(ss.str(), "./debug.out");
-    }
+    }*/
 
     /* Now, construct the new matrix on this rank */
     SpTuples<IT,NT> * finalTuples = new SpTuples<IT,NT>(recvTuples.size(), newLocRows, newLocCols, 
@@ -856,29 +861,43 @@ DER* SpParHelper::MultSendSingleRecvMatrix(std::vector<int> sendRanks, int recvR
     int sendRows = (int)std::sqrt(sendRanks.size());
     int sendCols = sendRows;
 
-    // Mapping lambda used to map a tuple to a sendRank 
-    auto tupleMap = [sendRows, sendCols, &Matrix](std::tuple<IT,IT,NT>& t)
+    // Mapping lambda used to map indices to a sendRank 
+    auto TupleMap = [sendRows, sendCols, &Matrix](IT i, IT j)
     {
-        IT i = std::get<0>(t);
-        IT j = std::get<1>(t);
-
         IT locRows = std::ceil((float)(Matrix->getnrow()) / (float)(sendRows));
         IT locCols = std::ceil((float)(Matrix->getncol()) / (float)(sendCols));
 
-        return (i/locRows) + (j/locCols);
-
+        return ((i/locRows)*sendCols) + (j/locCols);
     };
 
-    // True if my matrix is on the edge of the old grid and if I'm sending to an edge on the new grid
-    auto isEdgeCaseRow = [Matrix](int sendIdx, int sendRows)
+
+    auto MakeTuple = [sendRows, sendCols, &Matrix](IT i, IT j, NT val, int sendIdx)
     {
-        return ( (Matrix->getnrow()/sendRows) == std::ceil((float)Matrix->getnrow()/(float)sendRows) ) && 
+        IT locRows = Matrix->getnrow() / sendRows;
+        IT locCols = Matrix->getncol() / sendCols;
+
+        int rankInSendRow = sendIdx % sendCols;
+        int rankInSendCol = sendIdx / sendRows;
+
+        // This SHOULD be able to handle edge cases
+        IT rowIdx = i - (rankInSendCol*locRows);
+        IT colIdx = j - (rankInSendRow*locCols);
+
+        return std::tuple<IT,IT,NT>({rowIdx,colIdx,val});
+    };
+
+
+    // True if my matrix is on the edge of the old grid and if I'm sending to an edge on the new grid
+    auto IsEdgeCaseRow = [Matrix](int sendIdx, int sendRows)
+    {
+        return ( (Matrix->getnrow()/sendRows) != std::ceil((float)Matrix->getnrow()/(float)sendRows) ) && 
                 ((sendIdx / sendRows) == (sendRows - 1));
     };
 
-    auto isEdgeCaseCol = [Matrix](int sendIdx, int sendCols)
+
+    auto IsEdgeCaseCol = [Matrix](int sendIdx, int sendCols)
     {
-        return ( (Matrix->getncol()/sendCols) == std::ceil((float)Matrix->getncol()/(float)sendCols) ) && 
+        return ( (Matrix->getncol()/sendCols) != std::ceil((float)Matrix->getncol()/(float)sendCols) ) && 
                 ((sendIdx / sendCols) == (sendCols - 1));
     };
 
@@ -889,42 +908,47 @@ DER* SpParHelper::MultSendSingleRecvMatrix(std::vector<int> sendRanks, int recvR
     TupleMtx sendTuples(sendRanks.size());
     std::vector<std::vector<IT>> sendDims(sendRanks.size());
 
-
     for (auto colIter = Matrix->begcol(); colIter!=Matrix->endcol(); colIter++)
     {
         for (auto nzIter = Matrix->begnz(colIter); nzIter != Matrix->endnz(colIter); nzIter++)
         {
             // Create tuple, push to send tuples
-            std::tuple<IT,IT,NT> t({nzIter.rowid(), colIter.colid(), nzIter.value()});
-            int sendIdx = tupleMap(t);
-            std::cout<<"sendIdx: " + std::to_string(sendIdx)
-                                + " for (" + std::to_string(nzIter.rowid()) + ","
-                                + std::to_string(colIter.colid()) + ")\n";
+            int sendIdx = TupleMap(nzIter.rowid(), colIter.colid());
+            /*
+            SpParHelper::PrintFile("sendIdx: " + std::to_string(sendIdx)
+                                    + " for (" + std::to_string(nzIter.rowid()) + ","
+                                    + std::to_string(colIter.colid()) + ")\n",
+                                    "./debug-up.out");
+                                    */
+
+            std::tuple<IT,IT,NT> t = MakeTuple(nzIter.rowid(), colIter.colid(), nzIter.value(), sendIdx);
+
             sendTuples[sendIdx].push_back(t);
 
 
-            if (sendDims[sendIdx].empty())
-                sendDims[sendIdx].resize(2);
-
-            if (isEdgeCaseRow(sendIdx, sendRows))
-            {
-                sendDims[sendIdx][0] = (IT)std::ceil((float)Matrix->getnrow() / (float)sendRows);
-                sendDims[sendIdx][1] = Matrix->getncol();
-            }
-            else if (isEdgeCaseCol(sendIdx, sendCols))
-            {
-                sendDims[sendIdx][0] = Matrix->getnrow();
-                sendDims[sendIdx][1] = (IT)std::ceil((float)Matrix->getncol() / (float)sendCols);
-            }
-            else
-            {
-                sendDims[sendIdx][0] = Matrix->getnrow();
-                sendDims[sendIdx][1] = Matrix->getncol();
-            }
-
         }
     }
-    SpParHelper::Print("Past tuples\n");
+
+    for (int sendIdx=0; sendIdx < sendRanks.size(); sendIdx++)
+    {
+        sendDims[sendIdx].resize(2);
+
+        sendDims[sendIdx][0] = Matrix->getnrow()/sendRows;
+        sendDims[sendIdx][1] = Matrix->getncol()/sendCols;
+
+        if (IsEdgeCaseRow(sendIdx, sendRows))
+        {
+            IT edgeCaseLen = Matrix->getnrow() % sendRows;
+            sendDims[sendIdx][0] += edgeCaseLen; 
+        }
+
+        if (IsEdgeCaseCol(sendIdx, sendCols))
+        {
+            IT edgeCaseLen = Matrix->getncol() % sendCols;
+            sendDims[sendIdx][1] += edgeCaseLen; 
+        }
+
+    }
 
     // Now, compute recv buffer sizes for all ranks I send to, and send those sizes to sendRanks
     MPI_Request * sizeReqArr = new MPI_Request[sendTuples.size()];
@@ -934,7 +958,6 @@ DER* SpParHelper::MultSendSingleRecvMatrix(std::vector<int> sendRanks, int recvR
         IT sendBuf[] = {sendSize, sendDims[i][0], sendDims[i][1]};
         MPI_Isend((void*)(sendBuf), 3, MPIType<IT>(), sendRanks[i], 0, MPI_COMM_WORLD, &(sizeReqArr[i]));
     }
-    SpParHelper::Print("Past sends\n");
 
 
     // Receive recv size
@@ -962,7 +985,7 @@ DER* SpParHelper::MultSendSingleRecvMatrix(std::vector<int> sendRanks, int recvR
     
 
     // Construct new matrix on this rank
-    SpTuples<IT,NT> * finalTuples = new SpTuples<IT,NT>(recvTuples.size(), recvSize[1], recvSize[0],
+    SpTuples<IT,NT> * finalTuples = new SpTuples<IT,NT>(recvTuples.size(), recvSize[1], recvSize[2],
                                                     recvTuples.data(), false, false);
 
     // Don't delete sizeReqArr or tuplesReqArr until all receives have happened
