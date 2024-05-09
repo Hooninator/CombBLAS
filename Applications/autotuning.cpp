@@ -70,65 +70,12 @@ int main(int argc, char ** argv) {
         stime = MPI_Wtime();
     
         autotuning::SpGEMMParams resultParams;
+        autotuning::SpGEMMParams defaultParams = autotuning::SpGEMMParams::GetDefaultParams();
 
         resultParams = tuner.TuneSpGEMM2DAnalytical(A,B,matpathA,matpathB,maxNodes);
     
         etime = MPI_Wtime();
         tuningTime += (etime - stime);
-
-        autotuning::SpGEMMParams defaultParams = autotuning::SpGEMMParams::GetDefaultParams();
-        autotuning::SpGEMMParams scalingDownParams(1, std::floor(std::sqrt(defaultParams.GetPPN()))-1, 1);
-
-        /**** TEST SCALING DOWN ****/
-        /////////////////////////////
-
-        if (rank==0)
-            std::cout<<"Testing scaling down..."<<std::endl;
-
-        SpParMat<IT,UT,DER> Adown(grid );
-        Adown.ParallelReadMM(matpathA, true, maximum<double>());
-        Adown.ParallelWriteMM("./stomach-correct.mtx", true);
-
-        // Re-distribute from default to smaller process grid
-        DER * AdownLocalRedist = scalingDownParams.ReDistributeSpMat(Adown.seqptr(), defaultParams);
-
-        auto smallGrid = scalingDownParams.MakeGridFromParams();
-        /*
-        if (smallGrid!=NULL) 
-        {
-            std::cout<<rank<<" doing write of scaled down mtx"<<std::endl;
-            SpParMat<IT,UT,DER> AdownRedist(AdownLocalRedist, smallGrid);
-            AdownRedist.ParallelWriteMM("./stomach-down.mtx", true );
-        }*/
-        //TODO: Fix destructor bs
-
-        if (rank==0)
-            std::cout<<"Scaling down done"<<std::endl;
-
-        ///////////////////////////
-        /**** END TEST SCALING DOWN ****/
-       
-        MPI_Barrier(MPI_COMM_WORLD);
-
-        /**** TEST SCALING UP ****/
-        ///////////////////////////
-        if (rank==0)
-            std::cout<<"Testing scaling up..."<<std::endl;
-
-        // Re-redistribute from smaller to default process grid
-        DER * AupLocalRedist = defaultParams.ReDistributeSpMat(AdownLocalRedist, scalingDownParams);
-
-
-        SpParMat<IT,UT,DER> AupRedist(AupLocalRedist, grid);
-        AupRedist.ParallelWriteMM("./stomach-up.mtx", true);
-
-
-        if (rank==0)
-            std::cout<<"Scaling up done"<<std::endl;
-
-        /**** END TEST SCALING UP ****/
-        ///////////////////////////
-    
 
         bool doMult = (bool)(std::atoi(argv[5]));
     
