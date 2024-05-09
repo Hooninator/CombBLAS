@@ -91,11 +91,13 @@ public:
     static void GatherMatrix(MPI_Comm & comm1d, SpMat<IT,NT,DER> & Matrix, int root);
 
 	template<typename IT, typename NT, typename DER>	
-    static void SingleSendMultRecvMatrix(std::vector<int> recvRanks, int sendRank,
-                                        SpMat<IT,NT,DER> * Matrix);
+    static DER* SingleSendMultRecvMatrix(std::vector<int> recvRanks, int sendRank,
+                                        SpMat<IT,NT,DER> * Matrix, int rankInSuperTileRow,
+                                        int rankInSuperTileCol,
+                                        int procsInOldGridRow, int procsInOldGridCol);
 
 	template<typename IT, typename NT, typename DER>	
-    static void MultSendSingleRecvMatrix(std::vector<int> sendRanks, int recvRank,
+    static DER* MultSendSingleRecvMatrix(std::vector<int> sendRanks, int recvRank,
                                         SpMat<IT,NT,DER> * Matrix);
 
 	template<typename IT, typename NT, typename DER>

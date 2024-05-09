@@ -141,6 +141,8 @@ public:
     DER * ReDistributeSpMat(DER * mat, SpGEMMParams& oldParams)
     {
 
+        DER *newMat;
+        
         auto newParams = *(this);
 
         auto isInNewGrid = [&newParams](int rank )
@@ -156,12 +158,29 @@ public:
             int localRank = rank % jobPtr->tasksPerNode;
             return nodeRank < oldParams.GetNodes() && localRank < oldParams.GetPPN();
         };
+
         // Given the rank of a process in COMM_WORLD, get the rank of that process in old grid
         std::map<int, int> worldToOldGridRank;
         // Given the rank of a process in old grid, get the rank of that procss in COMM_WORLD
         std::map<int, int> oldGridToWorldRank;
 
+        // Given the rank of a process in COMM_WORLD, get the rank of that process in new grid
+        std::map<int, int> worldToNewGridRank;
+        // Given the rank of a process in new grid, get the rank of that process in COMM_WORLD 
+        std::map<int, int> newGridToWorldRank;
+
         int i=0;
+        for (int node=0; node<newParams.nodes; node++) 
+        {
+            for (int p=0; p<newParams.ppn; p++) 
+            {
+                newGridToWorldRank[i] = p + node * newParams.ppn;
+                worldToNewGridRank[p + node * newParams.ppn] = i;
+                i++;
+            }
+        }
+
+        i = 0;
         for (int node=0; node<oldParams.nodes; node++) 
         {
             for (int p=0; p<oldParams.ppn; p++) 
@@ -172,21 +191,6 @@ public:
             }
         }
 
-        // Given the rank of a process in COMM_WORLD, get the rank of that process in new grid
-        std::map<int, int> worldToNewGridRank;
-        // Given the rank of a process in new grid, get the rank of that process in COMM_WORLD 
-        std::map<int, int> newGridToWorldRank;
-
-        i = 0;
-        for (int node=0; node<newParams.nodes; node++) 
-        {
-            for (int p=0; p<newParams.ppn; p++) 
-            {
-                newGridToWorldRank[i] = p + node * newParams.ppn;
-                worldToNewGridRank[p + node * newParams.ppn] = i;
-                i++;
-            }
-        }
 
 
         int oldGridDim = RoundedSqrt<int,int>(oldParams.totalProcs);
@@ -204,10 +208,17 @@ public:
         { 
             return (rowRank / superCols)  + (colRank / superRows) * ( superRows);
         };
+
+        auto GetRankInSuperTile = [](int gridRank, int superDim)
+        {
+            return gridRank % superDim;
+        };
      
+
         // Same size. Just return this process seqptr 
         if (oldParams.GetTotalProcs() == newParams.totalProcs)
             return mat; 
+
 
         // Scaling up
         if (oldParams.GetTotalProcs() < newParams.totalProcs)
@@ -246,8 +257,7 @@ public:
 #endif
             }
 
-            SpParHelper::MultSendSingleRecvMatrix(sendRanks, recvRank, mat);
-
+            newMat = SpParHelper::MultSendSingleRecvMatrix(sendRanks, recvRank, mat);
         }
 
         // Scaling down
@@ -290,11 +300,16 @@ public:
 #endif
             }
 
-            SpParHelper::SingleSendMultRecvMatrix(recvRanks, sendRank, mat);
+            int rankInSuperTileRow = GetRankInSuperTile(rankInOldGridRow, superTileDim);
+            int rankInSuperTileCol = GetRankInSuperTile(rankInOldGridCol, superTileDim);
+
+            newMat = SpParHelper::SingleSendMultRecvMatrix(recvRanks, sendRank, mat, 
+                                                            rankInSuperTileRow, rankInSuperTileCol,
+                                                            oldGridDim, oldGridDim);
 
         }
 
-        MPI_Barrier(MPI_COMM_WORLD);
+        return newMat;
 
     }
 
