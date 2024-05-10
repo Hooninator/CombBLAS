@@ -46,16 +46,17 @@ void RunRedistTest(SpParMat<IT,UT,DER>& A, std::string matpathA, int rank)
     A.ParallelWriteMM("./stomach-correct.mtx", true);
 
     // Re-distribute from default to smaller process grid
-    DER * AdownLocalRedist = scalingDownParams.ReDistributeSpMat(Adown.seqptr(), defaultParams);
+    DER * AdownLocalRedist = scalingDownParams.ReDistributeSpMat(A.seqptr(), defaultParams);
 
     auto smallGrid = scalingDownParams.MakeGridFromParams();
     if (smallGrid!=NULL) 
     {
         DER * AdownLocalRedistCpy = new DER(*AdownLocalRedist);
-        std::cout<<rank<<" doing write of scaled down mtx"<<std::endl;
         SpParMat<IT,UT,DER> AdownRedist(AdownLocalRedistCpy, smallGrid);
         AdownRedist.ParallelWriteMM("./stomach-down.mtx", true );
     }
+
+    MPI_Barrier(MPI_COMM_WORLD);
 
     if (rank==0)
         std::cout<<"Scaling down done"<<std::endl;
@@ -74,9 +75,14 @@ void RunRedistTest(SpParMat<IT,UT,DER>& A, std::string matpathA, int rank)
     DER * AupLocalRedist = defaultParams.ReDistributeSpMat(AdownLocalRedist, scalingDownParams);
 
 
-    SpParMat<IT,UT,DER> AupRedist(AupLocalRedist, grid);
-    AupRedist.ParallelWriteMM("./stomach-up.mtx", true);
+    if (grid!=NULL)
+    {
+        DER * AupLocalRedistCpy = new DER(*AupLocalRedist);
+        SpParMat<IT,UT,DER> AupRedist(AupLocalRedistCpy, grid);
+        AupRedist.ParallelWriteMM("./stomach-up.mtx", true);
+    }
 
+    MPI_Barrier(MPI_COMM_WORLD);
 
     if (rank==0)
         std::cout<<"Scaling up done"<<std::endl;
@@ -84,7 +90,7 @@ void RunRedistTest(SpParMat<IT,UT,DER>& A, std::string matpathA, int rank)
     /**** END TEST SCALING UP ****/
     ///////////////////////////
     
-
+    MPI_Barrier(MPI_COMM_WORLD);
 }
 
 
@@ -118,8 +124,6 @@ int main(int argc, char ** argv)
         A.ParallelReadMM(matpathA, true, maximum<double>());
 
         RunRedistTest(A, matpathA, rank);
-
-        MPI_Barrier(MPI_COMM_WORLD);
 
     }
 
