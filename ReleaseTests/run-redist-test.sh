@@ -5,7 +5,7 @@ mtx=$1
 startnodes=$2
 downnodes=$3
 startppn=$4
-downppn=$4
+downppn=$5
 
 >debug-down.out
 >$mtx-down.mtx
@@ -14,7 +14,7 @@ downppn=$4
 >$mtx-up.mtx
 
 >$mtx-correct.mtx
-mpirun -n $startppn ReleaseTests/TuningRedist --mat ../redist_test_matrices/$mtx/$mtx.mtx --startnodes $startnodes --downnodes $downnodes --startppn $startppn --downppn $downppn
+mpirun -n $startppn ReleaseTests/TuningRedist --matpath ../redist_test_matrices/$mtx/$mtx.mtx --startnodes $startnodes --downnodes $downnodes --startppn $startppn --downppn $downppn
 
 
 DIFFUP=$(diff ${mtx}-correct.mtx ${mtx}-up.mtx)

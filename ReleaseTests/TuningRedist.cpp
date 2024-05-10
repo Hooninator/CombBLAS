@@ -35,17 +35,37 @@ unsigned int NextSmallestPerfectSquare(unsigned int n) {
 }
 
 
+std::string GetMatnameFromPath(const std::string& path)
+{
+    size_t start = path.rfind('/') + 1; // +1 to start after '/'
+    size_t end = path.rfind('.');
+    std::string fileName = path.substr(start, end - start);
+    return fileName;
+}
+
+
 void RunRedistTest(std::string matpathA, int rank, 
                     SpGEMMParams& startParams, 
                     SpGEMMParams& downParams)
 {
 
+    std::string matname = GetMatnameFromPath(matpathA);
+
+    if (rank==0) {
+        startParams.Print();
+        downParams.Print();
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+
     auto startGrid = startParams.MakeGridFromParams();
     auto downGrid = downParams.MakeGridFromParams();
 
     if (startGrid!=NULL) {
-        SpParMat<IT,UT,DER> A(startGrid);
-        A.ParallelReadMM(matpathA, true, maximum<double>());
+
+        SpParMat<IT,UT,DER> Astart(startGrid);
+        Astart.ParallelReadMM(matpathA, true, maximum<double>());
+        Astart.ParallelWriteMM(matname+"-correct.mtx", true);
 
         /**** TEST SCALING DOWN ****/
         /////////////////////////////
@@ -53,19 +73,19 @@ void RunRedistTest(std::string matpathA, int rank,
         if (rank==0)
             std::cout<<"Testing scaling down..."<<std::endl;
 
-        A.ParallelWriteMM(matpathA+"-correct.mtx", true);
-
         // Re-distribute from default to smaller process grid
-        DER * AdownLocalRedist = downParams.ReDistributeSpMat(A.seqptr(), startParams);
+        DER * AdownLocalRedist = downParams.ReDistributeSpMat(Astart.seqptr(), 
+                                                                startParams);
+
+        MPI_Barrier(Astart.getcommgrid()->GetWorld());
 
         if (downGrid!=NULL) 
         {
             DER * AdownLocalRedistCpy = new DER(*AdownLocalRedist);
             SpParMat<IT,UT,DER> AdownRedist(AdownLocalRedistCpy, downGrid);
-            AdownRedist.ParallelWriteMM(matpathA+"-down.mtx", true );
+            AdownRedist.ParallelWriteMM(matname+"-down.mtx", true );
         }
 
-        MPI_Barrier(A.getcommgrid()->GetWorld());
 
         if (rank==0)
             std::cout<<"Scaling down done"<<std::endl;
@@ -73,7 +93,7 @@ void RunRedistTest(std::string matpathA, int rank,
         ///////////////////////////
         /**** END TEST SCALING DOWN ****/
        
-        MPI_Barrier(A.getcommgrid()->GetWorld());
+        MPI_Barrier(Astart.getcommgrid()->GetWorld());
 
         /**** TEST SCALING UP ****/
         ///////////////////////////
@@ -88,10 +108,10 @@ void RunRedistTest(std::string matpathA, int rank,
         {
             DER * AupLocalRedistCpy = new DER(*AupLocalRedist);
             SpParMat<IT,UT,DER> AupRedist(AupLocalRedistCpy, startGrid);
-            AupRedist.ParallelWriteMM(matpathA+"-up.mtx", true);
+            AupRedist.ParallelWriteMM(matname+"-up.mtx", true);
         }
 
-        MPI_Barrier(A.getcommgrid()->GetWorld());
+        MPI_Barrier(Astart.getcommgrid()->GetWorld());
 
         if (rank==0)
             std::cout<<"Scaling up done"<<std::endl;
@@ -109,20 +129,21 @@ void parse_args(int argc, char ** argv,
                 int& startNodes, int& startPPN,
                 int& downNodes, int& downPPN)
 {
-    for (int i=1; i<argc-1; i++) {
+    for (int i=1; i<argc; i++) {
 
         if (!strcmp(argv[i], "--startnodes"))
             startNodes = std::atoi(argv[i+1]);
         if (!strcmp(argv[i], "--downnodes"))
             downNodes = std::atoi(argv[i+1]);
         if (!strcmp(argv[i], "--startppn"))
-            downNodes = std::atoi(argv[i+1]);
+            startPPN = std::atoi(argv[i+1]);
         if (!strcmp(argv[i], "--downppn"))
-            downNodes = std::atoi(argv[i+1]);
+            downPPN = std::atoi(argv[i+1]);
         if (!strcmp(argv[i], "--matpath"))
-            downNodes = std::atoi(argv[i+1]);
+            matpath = std::string(argv[i+1]);
 
     }
+    
 }
 
 
