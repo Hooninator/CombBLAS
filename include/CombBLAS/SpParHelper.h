@@ -100,6 +100,10 @@ public:
     static DER* MultSendSingleRecvMatrix(std::vector<int> sendRanks, int recvRank,
                                         SpMat<IT,NT,DER> * Matrix);
 
+
+    template <typename IT, typename NT, typename DER>
+    static DER* SingleSendSingleRecvMatrix(int sendRank, int recvRank, SpMat<IT,NT,DER> * Matrix);
+
 	template<typename IT, typename NT, typename DER>
 	static void SetWindows(MPI_Comm & comm1d, const SpMat< IT,NT,DER > & Matrix, std::vector<MPI_Win> & arrwin);
 

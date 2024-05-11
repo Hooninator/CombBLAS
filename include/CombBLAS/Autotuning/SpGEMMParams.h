@@ -32,7 +32,6 @@ public:
 
 
 
-
     void Print() {
         std::cout<< "(Nodes: "<<nodes<<", PPN: "<<ppn<<", Layers: "<<layers<<")"<<std::endl;
     }
@@ -215,9 +214,29 @@ public:
         };
      
 
-        // Same size. Just return this process seqptr 
-        if (oldParams.GetTotalProcs() == newParams.totalProcs)
-            return mat; 
+        // Same size. Rescale 
+        if (oldParams.GetTotalProcs() == newParams.totalProcs) {
+
+            // Same grid, do nothing
+            if (oldParams.GetNodes() == newParams.GetNodes())
+                newMat = new DER(*mat);
+
+            // One to one redistribution
+            
+            int sendRank = -1;
+            int recvRank = -1;
+
+            if (isInOldGrid(rank)) {
+                sendRank = newGridToWorldRank[rank];
+            }
+
+            if (isInNewGrid(rank)) {
+                recvRank = oldGridToWorldRank[rank];
+            }
+            
+            newMat = SpParHelper::SingleSendSingleRecvMatrix(sendRank, recvRank, mat);
+
+        }
 
 
         // Scaling up
@@ -233,8 +252,10 @@ public:
             int recvRank = oldGridToWorldRank[recvRankIdx];
 
 #ifdef DEBUG
-            debugPtr->Log("Rank " + std::to_string(rank) + " receiving from new grid rank " + std::to_string(recvRank));
-            debugPtr->Log("Rank " + std::to_string(rank) + " receiving from world rank " + std::to_string(recvRank));
+            debugPtr->Log("Rank " + std::to_string(rank) +
+                    " receiving from new grid rank " + std::to_string(recvRank));
+            debugPtr->Log("Rank " + std::to_string(rank) + 
+                    " receiving from world rank " + std::to_string(recvRank));
 #endif
 
             std::vector<int> sendRanks;
